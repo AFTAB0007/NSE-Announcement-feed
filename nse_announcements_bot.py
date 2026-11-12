@@ -63,6 +63,14 @@ try:
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
+# added Github code 
+# Render Data Directory
+DATA_DIR = os.getenv("DATA_DIR", ".")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def data_path(filename):
+    return os.path.join(DATA_DIR, filename)
+
 
 
 def log(msg: str) -> None:
