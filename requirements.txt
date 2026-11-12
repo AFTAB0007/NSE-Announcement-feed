@@ -1,0 +1,6 @@
+curl_cffi
+python-dotenv
+yfinance
+google-genai
+requests
+pdfplumber
