@@ -23,7 +23,7 @@ NSE Corporate Announcements Bot — Institutional Telegram Alert Engine
 - TLS/JA3 Browser Spoofing via curl_cffi
 - Multi-Key Fallback Engine for Gemini API (Key 1 -> Key 2 -> Key 3)
 - 2-Hour Automated Periodic Health & Quota Dispatcher
-- Interactive Telegram Menu (hi/menu/status): Interval & Batch Size Controls
+- Interactive Telegram Menu (hi/menu/status): Interval, Batch Size & News Filters
 ================================================================================
 """
 
@@ -140,8 +140,14 @@ MAX_EVALUATIONS_PER_CYCLE = int(get_secret("MAX_EVALUATIONS_PER_CYCLE", "50"))
 GEMINI_DAILY_CALL_BUDGET = int(get_secret("GEMINI_DAILY_CALL_BUDGET", "300"))
 GEMINI_USAGE_PATH = "gemini_usage.json"
 SEEN_ANNOUNCEMENTS_PATH = "seen_announcements.json"
+USER_PREFS_PATH = data_path("user_preferences.json")
+NEWS_CACHE_PATH = data_path("recent_announcements_cache.json")
+MAX_CACHED_ANNOUNCEMENTS = 150
 
 CYCLE_COUNTER = 0
+_CYCLE_LOCK = threading.Lock()
+_PREFS_LOCK = threading.Lock()
+_CACHE_LOCK = threading.Lock()
 
 # ============================================================================
 # SQLITE3 F&O REPOSITORY & ADVANCED NORMALIZER
@@ -1046,6 +1052,141 @@ def mark_seen(seen: dict, ann_id: str, symbol: str, status: str) -> None:
 
 
 # ============================================================================
+# NEWS CATEGORIZATION, LOCAL CACHE & USER PREFERENCES ENGINE
+# ============================================================================
+FILTER_CATEGORY_LABELS = {
+    "fno": "F&O Stocks",
+    "cash": "Cash Stocks",
+    "order": "Order Stocks",
+    "result": "Result Stocks",
+    "all": "All Announcements",
+}
+
+
+def classify_news_categories(symbol: str, event_type: str, desc: str) -> list:
+    """Classifies an evaluated announcement into filter categories using existing F&O lookup & keywords."""
+    categories = []
+    segment_label, _ = get_fo_info(symbol)
+    if segment_label == "F&O Active":
+        categories.append("fno")
+    else:
+        categories.append("cash")
+
+    combined_text = f"{event_type or ''} {desc or ''}".lower()
+    if any(k in combined_text for k in ["order", "contract", "work order", "award", "bagged", "loi", "letter of intent"]):
+        categories.append("order")
+
+    if any(k in combined_text for k in ["result", "financial", "earnings", "quarter", "q1", "q2", "q3", "q4", "ufr", "profit", "revenue", "outcome of board"]):
+        categories.append("result")
+
+    return categories
+
+
+def cache_processed_announcement(ann_id: str, record: dict) -> None:
+    """Stores evaluated HIGH/MEDIUM announcements locally so menu filters reuse existing data without extra API calls."""
+    with _CACHE_LOCK:
+        cache = _load_json_safe(NEWS_CACHE_PATH)
+        items = cache.get("items", [])
+        items = [x for x in items if x.get("id") != ann_id]
+        items.insert(0, record)
+        cache["items"] = items[:MAX_CACHED_ANNOUNCEMENTS]
+        _save_json_atomic(NEWS_CACHE_PATH, cache)
+
+
+def get_cached_announcements(category_filter: str = "all", limit: int = 8) -> list:
+    """Retrieves matching announcements from already-fetched local cache."""
+    with _CACHE_LOCK:
+        cache = _load_json_safe(NEWS_CACHE_PATH)
+        items = cache.get("items", [])
+
+    if category_filter == "all":
+        return items[:limit]
+
+    matched = [
+        item for item in items
+        if category_filter in item.get("categories", [])
+    ]
+    return matched[:limit]
+
+
+def load_user_preferences() -> dict:
+    with _PREFS_LOCK:
+        return _load_json_safe(USER_PREFS_PATH)
+
+
+def save_user_preferences(prefs: dict) -> None:
+    with _PREFS_LOCK:
+        _save_json_atomic(USER_PREFS_PATH, prefs)
+
+
+def get_user_pref_entry(chat_id: str) -> dict:
+    cid = str(chat_id)
+    prefs = load_user_preferences()
+    entry = prefs.get(cid)
+    if not isinstance(entry, dict):
+        return {"saved": [], "draft": []}
+    return {
+        "saved": list(entry.get("saved", [])),
+        "draft": list(entry.get("draft", entry.get("saved", []))),
+    }
+
+
+def toggle_user_pref_draft(chat_id: str, category: str) -> list:
+    cid = str(chat_id)
+    prefs = load_user_preferences()
+    entry = prefs.get(cid)
+    if not isinstance(entry, dict):
+        entry = {"saved": [], "draft": []}
+
+    draft = list(entry.get("draft", entry.get("saved", [])))
+    if category == "all":
+        draft = [] if "all" in draft else ["all"]
+    else:
+        if "all" in draft:
+            draft.remove("all")
+        if category in draft:
+            draft.remove(category)
+        else:
+            draft.append(category)
+
+    entry["draft"] = draft
+    prefs[cid] = entry
+    save_user_preferences(prefs)
+    return draft
+
+
+def commit_user_prefs(chat_id: str) -> list:
+    cid = str(chat_id)
+    prefs = load_user_preferences()
+    entry = prefs.get(cid)
+    if not isinstance(entry, dict):
+        entry = {"saved": [], "draft": []}
+    entry["saved"] = list(entry.get("draft", []))
+    prefs[cid] = entry
+    save_user_preferences(prefs)
+    return entry["saved"]
+
+
+def reset_user_prefs(chat_id: str) -> None:
+    cid = str(chat_id)
+    prefs = load_user_preferences()
+    prefs[cid] = {"saved": [], "draft": []}
+    save_user_preferences(prefs)
+
+
+def matches_user_preferences(categories: list, chat_id: str = None) -> bool:
+    """Checks if an announcement matches the user's saved default preferences.
+    If no preference is saved or 'all' is selected, preserves existing default behavior (returns True).
+    """
+    target_chat = str(chat_id or TELEGRAM_CHAT_ID)
+    entry = get_user_pref_entry(target_chat)
+    saved = entry.get("saved", [])
+    if not saved or "all" in saved:
+        return True
+    return any(cat in saved for cat in categories)
+
+
+# ============================================================================
 # DIRECT NSE RSS PARSER
 # ============================================================================
 def _extract_initial_symbol_hint(title: str, link: str) -> str:
@@ -1185,10 +1326,10 @@ def format_telegram_message(announcement: dict, fields: dict, resolved_symbol: s
     )
 
 
-def send_telegram_message(text: str, reply_markup: dict = None, max_retries: int = 3) -> bool:
+def send_telegram_message(text: str, reply_markup: dict = None, max_retries: int = 3, chat_id: str = None) -> bool:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": str(chat_id or TELEGRAM_CHAT_ID),
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
@@ -1211,10 +1352,30 @@ def send_telegram_message(text: str, reply_markup: dict = None, max_retries: int
     return False
 
 
+def edit_telegram_message(chat_id: str, message_id: int, text: str, reply_markup: dict = None) -> bool:
+    """Edits an existing bot message in place (used for responsive Settings multi-select toggles)."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+    payload = {
+        "chat_id": str(chat_id),
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": False,
+    }
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+
+    try:
+        r = requests.post(url, data=payload, timeout=REQUEST_TIMEOUT)
+        return r.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+
 # ============================================================================
 # 2-HOUR SUMMARY DISPATCHER
 # ============================================================================
-def send_status_report(title: str = "2 HOUR Periodic Status Report") -> None:
+def send_status_report(title: str = "2 HOUR Periodic Status Report", chat_id: str = None) -> None:
     current_key_masked = f"Key #{ACTIVE_KEY_INDEX + 1} of {len(GEMINI_KEYS_POOL)}" if GEMINI_KEYS_POOL else "None"
     scan_interval_display = f"{CHECK_INTERVAL_SECONDS // 60} mins" if CHECK_INTERVAL_SECONDS < 3600 else f"{CHECK_INTERVAL_SECONDS / 3600:.1f} hrs"
 
@@ -1230,7 +1391,7 @@ def send_status_report(title: str = "2 HOUR Periodic Status Report") -> None:
         f"🔄 <b>Total Fetch Cycles Executed:</b> #{CYCLE_COUNTER}\n"
         f"📦 <b>Cached F&O Stocks:</b> {get_fno_total_count()} symbols"
     )
-    send_telegram_message(msg)
+    send_telegram_message(msg, chat_id=chat_id)
 
 
 def start_two_hour_report_thread() -> None:
@@ -1248,16 +1409,93 @@ def start_two_hour_report_thread() -> None:
 
 
 # ============================================================================
-# INTERACTIVE TELEGRAM INLINE MENUS
+# INTERACTIVE TELEGRAM INLINE MENUS (STOCK NEWS FILTER + SYSTEM CONTROLS)
 # ============================================================================
 def get_main_menu_markup() -> dict:
     return {
         "inline_keyboard": [
+            [{"text": "📰 1. NSE Announcements", "callback_data": "menu_nse_announcements"}],
+            [
+                {"text": "📈 2. F&O Stocks", "callback_data": "filter_news_fno"},
+                {"text": "💵 3. Cash Stocks", "callback_data": "filter_news_cash"},
+            ],
+            [
+                {"text": "🏗️ 4. Order Stocks", "callback_data": "filter_news_order"},
+                {"text": "📑 5. Result Stocks", "callback_data": "filter_news_result"},
+            ],
+            [
+                {"text": "⚙️ 6. Settings", "callback_data": "menu_settings"},
+                {"text": "🔄 7. Refresh News", "callback_data": "action_refresh_news"},
+            ],
             [{"text": "📊 Live System Status", "callback_data": "menu_status"}],
-            [{"text": "⏱️ Change Scan Interval", "callback_data": "menu_change_interval"}],
-            [{"text": "⚙️ Change Batch Limit (Items/Cycle)", "callback_data": "menu_change_limit"}],
+            [
+                {"text": "⏱️ Scan Interval", "callback_data": "menu_change_interval"},
+                {"text": "⚙️ Batch Limit", "callback_data": "menu_change_limit"},
+            ],
         ]
     }
+
+
+def get_nse_announcements_submenu_markup() -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "📈 F&O Stocks", "callback_data": "filter_news_fno"},
+                {"text": "💵 Cash Stocks", "callback_data": "filter_news_cash"},
+            ],
+            [
+                {"text": "🏗️ Order Stocks", "callback_data": "filter_news_order"},
+                {"text": "📑 Result Stocks", "callback_data": "filter_news_result"},
+            ],
+            [{"text": "📋 All Announcements", "callback_data": "filter_news_all"}],
+            [{"text": "🔙 Back to Main Menu", "callback_data": "menu_main"}],
+        ]
+    }
+
+
+def get_settings_menu_markup(chat_id: str) -> dict:
+    entry = get_user_pref_entry(chat_id)
+    draft = entry.get("draft", [])
+
+    def _chk(cat_key: str, label: str) -> str:
+        mark = "✅" if cat_key in draft else "⬜"
+        return f"{mark} {label}"
+
+    return {
+        "inline_keyboard": [
+            [
+                {"text": _chk("fno", "F&O Stocks"), "callback_data": "pref_toggle_fno"},
+                {"text": _chk("cash", "Cash Stocks"), "callback_data": "pref_toggle_cash"},
+            ],
+            [
+                {"text": _chk("order", "Order Stocks"), "callback_data": "pref_toggle_order"},
+                {"text": _chk("result", "Result Stocks"), "callback_data": "pref_toggle_result"},
+            ],
+            [{"text": _chk("all", "All Announcements"), "callback_data": "pref_toggle_all"}],
+            [
+                {"text": "💾 Save Preferences", "callback_data": "pref_save"},
+                {"text": "🔄 Reset to Default", "callback_data": "pref_reset"},
+            ],
+            [{"text": "🔙 Back to Main Menu", "callback_data": "menu_main"}],
+        ]
+    }
+
+
+def format_settings_prompt(chat_id: str) -> str:
+    entry = get_user_pref_entry(chat_id)
+    saved = entry.get("saved", [])
+    draft = entry.get("draft", [])
+
+    saved_str = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in saved) if saved else "Default (All Impact Alerts)"
+    draft_str = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in draft) if draft else "Default (All Impact Alerts)"
+
+    return (
+        "⚙️ <b>STOCK NEWS PREFERENCES</b>\n\n"
+        "Select one or more stock categories you want to receive automatically when new announcements arrive:\n\n"
+        f"📌 <b>Currently Saved:</b> <i>{escape_html(saved_str)}</i>\n"
+        f"📝 <b>Current Selection:</b> <i>{escape_html(draft_str)}</i>\n\n"
+        "Tap categories to toggle, then press <b>💾 Save Preferences</b>."
+    )
 
 
 def get_interval_menu_markup() -> dict:
@@ -1292,6 +1530,77 @@ def get_limit_menu_markup() -> dict:
             [{"text": "⬅️ Back to Menu", "callback_data": "menu_main"}],
         ]
     }
+
+
+def dispatch_filtered_news(chat_id: str, category_filter: str) -> None:
+    """Displays matching announcements from existing fetched cache without extra API calls."""
+    label = FILTER_CATEGORY_LABELS.get(category_filter, "Selected Filter")
+    items = get_cached_announcements(category_filter=category_filter, limit=6)
+
+    if not items:
+        send_telegram_message(
+            f"ℹ️ <b>{escape_html(label)}</b>\n\n"
+            "No recent announcements found in cache for this category yet.\n"
+            "Use <b>🔄 Refresh News</b> to check for new NSE filings.",
+            reply_markup=get_main_menu_markup(),
+            chat_id=chat_id,
+        )
+        return
+
+    send_telegram_message(
+        f"📊 <b>{escape_html(label)}</b> — Showing latest <b>{len(items)}</b> matching alert(s):",
+        chat_id=chat_id,
+    )
+    for item in reversed(items):
+        msg_text = item.get("formatted_message", "")
+        if msg_text:
+            send_telegram_message(msg_text, chat_id=chat_id)
+            time.sleep(0.25)
+
+
+def handle_refresh_news(chat_id: str) -> None:
+    """Checks for any new unseen announcements via existing cycle engine and displays matching news without duplicates."""
+    new_posted = run_cycle(target_chat_id=chat_id)
+
+    if new_posted > 0:
+        send_telegram_message(
+            f"✅ <b>Refresh Complete!</b> Dispatched <b>{new_posted}</b> new announcement(s) matching your preferences.",
+            reply_markup=get_main_menu_markup(),
+            chat_id=chat_id,
+        )
+        return
+
+    # If no new unseen filings arrived, show latest matching items from existing cache based on user preferences
+    entry = get_user_pref_entry(chat_id)
+    saved = entry.get("saved", [])
+
+    if not saved or "all" in saved:
+        items = get_cached_announcements(category_filter="all", limit=5)
+        pref_label = "All Announcements"
+    else:
+        with _CACHE_LOCK:
+            all_items = _load_json_safe(NEWS_CACHE_PATH).get("items", [])
+        items = [it for it in all_items if any(c in saved for c in it.get("categories", []))][:5]
+        pref_label = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in saved)
+
+    if not items:
+        send_telegram_message(
+            "🔄 <b>Refresh Complete:</b> No new NSE filings since last scan, and no cached items match your current filter.",
+            reply_markup=get_main_menu_markup(),
+            chat_id=chat_id,
+        )
+        return
+
+    send_telegram_message(
+        f"🔄 <b>No brand-new NSE filings since last check.</b>\n"
+        f"Showing latest <b>{len(items)}</b> cached alert(s) for <i>{escape_html(pref_label)}</i>:",
+        chat_id=chat_id,
+    )
+    for item in reversed(items):
+        msg_text = item.get("formatted_message", "")
+        if msg_text:
+            send_telegram_message(msg_text, chat_id=chat_id)
+            time.sleep(0.25)
 
 
 def answer_callback_query(callback_query_id: str, text: str = None) -> None:
@@ -1329,32 +1638,110 @@ def start_telegram_command_listener() -> None:
 
                     if "message" in update:
                         msg = update["message"]
+                        chat_id = str(msg.get("chat", {}).get("id") or TELEGRAM_CHAT_ID)
                         text = (msg.get("text", "") or "").strip().lower()
 
                         if text in ["hi", "menu", "status", "/start", "/menu", "/status"]:
                             reply_text = (
-                                "👋 <b>NSE Live Alert Engine Dashboard</b>\n\n"
+                                "📊 <b>STOCK NEWS FILTER & ALERT DASHBOARD</b>\n\n"
                                 f"Current Interval: <b>{CHECK_INTERVAL_SECONDS // 60} mins</b>\n"
                                 f"Batch Scan Limit: <b>{MAX_EVALUATIONS_PER_CYCLE} items/cycle</b>\n"
                                 f"Indexed F&O Contracts: <b>{get_fno_total_count()}</b>\n\n"
-                                "Configure system parameters:"
+                                "Choose a news category, configure preferences, or manage bot settings:"
                             )
-                            send_telegram_message(reply_text, reply_markup=get_main_menu_markup())
+                            send_telegram_message(reply_text, reply_markup=get_main_menu_markup(), chat_id=chat_id)
 
                     elif "callback_query" in update:
                         cq = update["callback_query"]
                         cq_id = cq.get("id")
                         data_val = cq.get("data", "")
+                        cq_msg = cq.get("message", {})
+                        chat_id = str(cq_msg.get("chat", {}).get("id") or TELEGRAM_CHAT_ID)
+                        message_id = cq_msg.get("message_id")
 
                         if data_val == "menu_status":
                             answer_callback_query(cq_id)
-                            send_status_report("System Live Health Status")
+                            send_status_report("System Live Health Status", chat_id=chat_id)
+
+                        elif data_val == "menu_nse_announcements":
+                            answer_callback_query(cq_id)
+                            send_telegram_message(
+                                "📰 <b>NSE ANNOUNCEMENTS FILTER</b>\n\nSelect a stock category to view matching announcements:",
+                                reply_markup=get_nse_announcements_submenu_markup(),
+                                chat_id=chat_id,
+                            )
+
+                        elif data_val.startswith("filter_news_"):
+                            cat_key = data_val.replace("filter_news_", "")
+                            answer_callback_query(cq_id, f"Loading {FILTER_CATEGORY_LABELS.get(cat_key, 'News')}...")
+                            dispatch_filtered_news(chat_id, cat_key)
+
+                        elif data_val == "menu_settings":
+                            answer_callback_query(cq_id)
+                            # Sync draft to currently saved preferences on open
+                            prefs = load_user_preferences()
+                            entry = prefs.get(chat_id, {"saved": [], "draft": []})
+                            entry["draft"] = list(entry.get("saved", []))
+                            prefs[chat_id] = entry
+                            save_user_preferences(prefs)
+
+                            send_telegram_message(
+                                format_settings_prompt(chat_id),
+                                reply_markup=get_settings_menu_markup(chat_id),
+                                chat_id=chat_id,
+                            )
+
+                        elif data_val.startswith("pref_toggle_"):
+                            cat_key = data_val.replace("pref_toggle_", "")
+                            toggle_user_pref_draft(chat_id, cat_key)
+                            answer_callback_query(cq_id, f"Toggled {FILTER_CATEGORY_LABELS.get(cat_key, cat_key)}")
+                            if message_id:
+                                edit_telegram_message(
+                                    chat_id=chat_id,
+                                    message_id=message_id,
+                                    text=format_settings_prompt(chat_id),
+                                    reply_markup=get_settings_menu_markup(chat_id),
+                                )
+
+                        elif data_val == "pref_save":
+                            saved_list = commit_user_prefs(chat_id)
+                            label_str = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in saved_list) if saved_list else "Default (All Alerts)"
+                            answer_callback_query(cq_id, "Preferences Saved!")
+                            if message_id:
+                                edit_telegram_message(
+                                    chat_id=chat_id,
+                                    message_id=message_id,
+                                    text=(
+                                        "✅ <b>Preferences Saved Successfully!</b>\n\n"
+                                        f"Your automatic news feed will now display:\n<b>{escape_html(label_str)}</b>"
+                                    ),
+                                    reply_markup=get_main_menu_markup(),
+                                )
+
+                        elif data_val == "pref_reset":
+                            reset_user_prefs(chat_id)
+                            answer_callback_query(cq_id, "Reset to Default!")
+                            if message_id:
+                                edit_telegram_message(
+                                    chat_id=chat_id,
+                                    message_id=message_id,
+                                    text=(
+                                        "🔄 <b>Preferences Reset to Default!</b>\n\n"
+                                        "All high/medium impact NSE announcements will be displayed automatically."
+                                    ),
+                                    reply_markup=get_settings_menu_markup(chat_id),
+                                )
+
+                        elif data_val == "action_refresh_news":
+                            answer_callback_query(cq_id, "Refreshing NSE News...")
+                            handle_refresh_news(chat_id)
 
                         elif data_val == "menu_change_interval":
                             answer_callback_query(cq_id)
                             send_telegram_message(
                                 "⏱️ <b>Select Scan Time Interval:</b>",
                                 reply_markup=get_interval_menu_markup(),
+                                chat_id=chat_id,
                             )
 
                         elif data_val == "menu_change_limit":
@@ -1362,13 +1749,15 @@ def start_telegram_command_listener() -> None:
                             send_telegram_message(
                                 "⚙️ <b>Select Max Announcements Checked Per Cycle:</b>",
                                 reply_markup=get_limit_menu_markup(),
+                                chat_id=chat_id,
                             )
 
                         elif data_val == "menu_main":
                             answer_callback_query(cq_id)
                             send_telegram_message(
-                                "👋 <b>NSE Live Alert Engine Dashboard</b>",
+                                "📊 <b>STOCK NEWS FILTER & ALERT DASHBOARD</b>",
                                 reply_markup=get_main_menu_markup(),
+                                chat_id=chat_id,
                             )
 
                         elif data_val.startswith("set_interval_"):
@@ -1378,7 +1767,8 @@ def start_telegram_command_listener() -> None:
                             label = f"{mins // 60} hr" if mins >= 60 else f"{mins} mins"
                             answer_callback_query(cq_id, f"Interval set to {label}!")
                             send_telegram_message(
-                                f"✅ <b>Scan interval updated!</b>\nNext checks will trigger every <b>{label}</b>."
+                                f"✅ <b>Scan interval updated!</b>\nNext checks will trigger every <b>{label}</b>.",
+                                chat_id=chat_id,
                             )
 
                         elif data_val.startswith("set_limit_"):
@@ -1386,114 +1776,136 @@ def start_telegram_command_listener() -> None:
                             MAX_EVALUATIONS_PER_CYCLE = limit_val
                             answer_callback_query(cq_id, f"Batch limit set to {limit_val} items!")
                             send_telegram_message(
-                                f"✅ <b>Cycle limit updated!</b>\nUp to <b>{limit_val} items</b> will now be scanned per cycle in 50-item batches."
+                                f"✅ <b>Cycle limit updated!</b>\nUp to <b>{limit_val} items</b> will now be scanned per cycle in 50-item batches.",
+                                chat_id=chat_id,
                             )
 
             except Exception:
                 time.sleep(3)
 
     threading.Thread(target=_listener_loop, daemon=True, name="tg-listener").start()
-    log("✅ Interactive Telegram configuration listener started.")
+    log("✅ Interactive Telegram configuration & news filter listener started.")
 
 
 # ============================================================================
 # MAIN SCAN LOOP
 # ============================================================================
-def run_cycle() -> None:
+def run_cycle(target_chat_id: str = None) -> int:
     global CYCLE_COUNTER
-    CYCLE_COUNTER += 1
-    log(f"--- Starting scan cycle #{CYCLE_COUNTER} ---")
+    with _CYCLE_LOCK:
+        CYCLE_COUNTER += 1
+        log(f"--- Starting scan cycle #{CYCLE_COUNTER} ---")
 
-    if not MODEL_NAME and not resolve_gemini_model():
-        log("⏳ Gemini service unavailable. Skipping this cycle.")
-        return
+        if not MODEL_NAME and not resolve_gemini_model():
+            log("⏳ Gemini service unavailable. Skipping this cycle.")
+            return 0
 
-    announcements = fetch_nse_announcements()
-    seen = load_seen()
-    posted_count = 0
+        announcements = fetch_nse_announcements()
+        seen = load_seen()
+        posted_count = 0
+        dispatch_chat = str(target_chat_id or TELEGRAM_CHAT_ID)
 
-    unseen_items = []
-    for ann in announcements:
-        ann_id = make_announcement_id(ann)
-        if ann_id not in seen:
-            ann["id"] = ann_id
-            unseen_items.append(ann)
-            if len(unseen_items) >= MAX_EVALUATIONS_PER_CYCLE:
+        unseen_items = []
+        for ann in announcements:
+            ann_id = make_announcement_id(ann)
+            if ann_id not in seen:
+                ann["id"] = ann_id
+                unseen_items.append(ann)
+                if len(unseen_items) >= MAX_EVALUATIONS_PER_CYCLE:
+                    break
+
+        if not unseen_items:
+            log("No new announcements to evaluate.")
+            return 0
+
+        log(f"Processing {len(unseen_items)} unseen item(s) with Gemini Scrip Extractor in batches...")
+
+        CHUNK_SIZE = 50
+        batches = [unseen_items[i:i + CHUNK_SIZE] for i in range(0, len(unseen_items), CHUNK_SIZE)]
+
+        for batch in batches:
+            if gemini_budget_remaining() <= 0:
+                log("🛑 Daily Gemini budget exhausted.")
                 break
 
-    if not unseen_items:
-        log("No new announcements to evaluate.")
-        return
+            batch_results = analyze_announcements_batch(batch)
 
-    log(f"Processing {len(unseen_items)} unseen item(s) with Gemini Scrip Extractor in batches...")
+            for item in batch:
+                ann_id = item["id"]
+                fallback_symbol = item.get("symbol", "")
 
-    CHUNK_SIZE = 50
-    batches = [unseen_items[i:i + CHUNK_SIZE] for i in range(0, len(unseen_items), CHUNK_SIZE)]
+                if ann_id in batch_results:
+                    fields = batch_results[ann_id]
 
-    for batch in batches:
-        if gemini_budget_remaining() <= 0:
-            log("🛑 Daily Gemini budget exhausted.")
-            break
+                    # 1. Resolve against official NSE cash-equity master first.
+                    equity_master = get_nse_equity_master()
+                    announcement_text = f"{item.get('desc', '')} {item.get('attchmntFile', '')}"
+                    official_match = resolve_official_nse_symbol(announcement_text, equity_master)
+                    gemini_scrip = normalize_symbol(fields.get("script_symbol", ""))
 
-        batch_results = analyze_announcements_batch(batch)
+                    if official_match:
+                        final_symbol = official_match
+                        if gemini_scrip and gemini_scrip != official_match:
+                            log(f"⚠️ Symbol conflict for announcement {ann_id[:8]}: NSE master={official_match}, Gemini={gemini_scrip}. Using NSE master.")
+                    elif is_official_nse_symbol(gemini_scrip, equity_master):
+                        final_symbol = gemini_scrip
+                    else:
+                        log(f"⏭️ Skipping announcement {ann_id[:8]}: no verified NSE equity symbol (Gemini returned '{gemini_scrip or 'blank'}').")
+                        mark_seen(seen, ann_id, "", "discarded_unresolved_symbol")
+                        continue
 
-        for item in batch:
-            ann_id = item["id"]
-            fallback_symbol = item.get("symbol", "")
+                    # 2. CMP fetch karo
+                    price, pchange = fetch_live_quote(final_symbol)
+                    published_str = format_ist_timestamp(item.get("an_dt", ""))
 
-            if ann_id in batch_results:
-                fields = batch_results[ann_id]
+                    # 3. PDF Data Deep Extraction (only for results or order wins to save CPU/Network)
+                    pdf_extracted_metrics = {}
+                    pdf_link = item.get("attchmntFile", "")
+                    event_type_str = (fields.get("event_type", "") + " " + item.get("desc", "")).lower()
 
-                # 1. Resolve against official NSE cash-equity master first.
-                equity_master = get_nse_equity_master()
-                announcement_text = f"{item.get('desc', '')} {item.get('attchmntFile', '')}"
-                official_match = resolve_official_nse_symbol(announcement_text, equity_master)
-                gemini_scrip = normalize_symbol(fields.get("script_symbol", ""))
+                    if pdf_link and pdf_link.endswith(".pdf") and any(k in event_type_str for k in ["result", "financial", "outcome", "order", "contract", "award", "ufr"]):
+                        log(f"📑 Downloading PDF for {final_symbol}: {pdf_link}")
+                        pdf_local = download_announcement_pdf(pdf_link)
+                        if pdf_local:
+                            pdf_extracted_metrics = extract_key_details_from_pdf(pdf_local)
+                            if pdf_extracted_metrics:
+                                log(f"📊 PDF Metrics Extracted for {final_symbol}: {pdf_extracted_metrics}")
 
-                if official_match:
-                    final_symbol = official_match
-                    if gemini_scrip and gemini_scrip != official_match:
-                        log(f"⚠️ Symbol conflict for announcement {ann_id[:8]}: NSE master={official_match}, Gemini={gemini_scrip}. Using NSE master.")
-                elif is_official_nse_symbol(gemini_scrip, equity_master):
-                    final_symbol = gemini_scrip
+                    # 4. Message format karo (internal SQLite query will check F&O or Cash)
+                    message = format_telegram_message(item, fields, final_symbol, price, pchange, published_str, pdf_data=pdf_extracted_metrics)
+
+                    # 4b. Classify & cache evaluated item for menu filters without extra API calls
+                    categories = classify_news_categories(final_symbol, fields.get("event_type", ""), item.get("desc", ""))
+                    cache_processed_announcement(ann_id, {
+                        "id": ann_id,
+                        "symbol": final_symbol,
+                        "categories": categories,
+                        "impact": fields.get("impact", "MEDIUM"),
+                        "event_type": fields.get("event_type", ""),
+                        "published_str": published_str,
+                        "formatted_message": message,
+                        "cached_at": datetime.now(timezone.utc).isoformat(),
+                    })
+
+                    # 5. Dispatch alert to Telegram (respecting saved user default preferences)
+                    if not matches_user_preferences(categories, chat_id=dispatch_chat):
+                        mark_seen(seen, ann_id, final_symbol, "filtered_by_user_pref")
+                        log(f"🔇 Skipped auto-alert for {final_symbol} (filtered by user preferences: {categories})")
+                        continue
+
+                    if send_telegram_message(message, chat_id=dispatch_chat):
+                        mark_seen(seen, ann_id, final_symbol, "posted")
+                        posted_count += 1
+                        log(f"✅ Alert sent [{fields['impact']}]: {final_symbol}")
+                    else:
+                        log(f"⚠️ Telegram delivery failed for {final_symbol}")
                 else:
-                    log(f"⏭️ Skipping announcement {ann_id[:8]}: no verified NSE equity symbol (Gemini returned '{gemini_scrip or 'blank'}').")
-                    mark_seen(seen, ann_id, "", "discarded_unresolved_symbol")
-                    continue
+                    mark_seen(seen, ann_id, fallback_symbol, "discarded_low_impact")
 
-                # 2. CMP fetch karo
-                price, pchange = fetch_live_quote(final_symbol)
-                published_str = format_ist_timestamp(item.get("an_dt", ""))
+            time.sleep(2.0)
 
-                # 3. PDF Data Deep Extraction (only for results or order wins to save CPU/Network)
-                pdf_extracted_metrics = {}
-                pdf_link = item.get("attchmntFile", "")
-                event_type_str = (fields.get("event_type", "") + " " + item.get("desc", "")).lower()
-
-                if pdf_link and pdf_link.endswith(".pdf") and any(k in event_type_str for k in ["result", "financial", "outcome", "order", "contract", "award", "ufr"]):
-                    log(f"📑 Downloading PDF for {final_symbol}: {pdf_link}")
-                    pdf_local = download_announcement_pdf(pdf_link)
-                    if pdf_local:
-                        pdf_extracted_metrics = extract_key_details_from_pdf(pdf_local)
-                        if pdf_extracted_metrics:
-                            log(f"📊 PDF Metrics Extracted for {final_symbol}: {pdf_extracted_metrics}")
-
-                # 4. Message format karo (internal SQLite query will check F&O or Cash)
-                message = format_telegram_message(item, fields, final_symbol, price, pchange, published_str, pdf_data=pdf_extracted_metrics)
-
-                # 5. Dispatch alert to Telegram
-                if send_telegram_message(message):
-                    mark_seen(seen, ann_id, final_symbol, "posted")
-                    posted_count += 1
-                    log(f"✅ Alert sent [{fields['impact']}]: {final_symbol}")
-                else:
-                    log(f"⚠️ Telegram delivery failed for {final_symbol}")
-            else:
-                mark_seen(seen, ann_id, fallback_symbol, "discarded_low_impact")
-
-        time.sleep(2.0)
-
-    log(f"--- Cycle #{CYCLE_COUNTER} complete: {len(unseen_items)} evaluated, {posted_count} posted. ---")
+        log(f"--- Cycle #{CYCLE_COUNTER} complete: {len(unseen_items)} evaluated, {posted_count} posted. ---")
+        return posted_count
 
 
 def validate_config() -> bool:
@@ -1550,7 +1962,8 @@ def main() -> None:
         f"F&O / Lot Size Detection: Active ({get_fno_total_count()} symbols indexed)\n"
         f"Scrip Resolution: Official NSE Master + Gemini Validation\n"
         f"PDF Financial/Order Extractor: Active\n"
-        f"Monitoring NSE RSS XML directly every {CHECK_INTERVAL_SECONDS // 60} min."
+        f"Monitoring NSE RSS XML directly every {CHECK_INTERVAL_SECONDS // 60} min.",
+        reply_markup=get_main_menu_markup(),
     )
 
     start_two_hour_report_thread()
@@ -1574,4 +1987,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
