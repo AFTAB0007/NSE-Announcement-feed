@@ -1963,7 +1963,7 @@ def main() -> None:
         f"Scrip Resolution: Official NSE Master + Gemini Validation\n"
         f"PDF Financial/Order Extractor: Active\n"
         f"Monitoring NSE RSS XML directly every {CHECK_INTERVAL_SECONDS // 60} min.",
-        reply_markup=get_main_menu_markup(),
+        
     )
 
     start_two_hour_report_thread()
