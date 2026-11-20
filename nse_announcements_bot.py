@@ -10,7 +10,7 @@ Original file is located at
 
 
 # pdf + old code & Stock Symbol
-# updated code for >>> stock symbol data >>>  03 Nov >>💥
+# updated code for >>> stock symbol data >>>  03 Nov >> 20 Nov💥
 # NSE Corporate Announcements Bot - Gemini-Powered Scrip & F&O Resolver Edition + PDF Highlights Extractor
 """   Dated 04Nov ...Updated ON 11 th NOV
 
