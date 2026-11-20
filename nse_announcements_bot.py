@@ -63,14 +63,14 @@ try:
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
-# added Github code 
+
 # Render Data Directory
 DATA_DIR = os.getenv("DATA_DIR", ".")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+
 def data_path(filename):
     return os.path.join(DATA_DIR, filename)
-
 
 
 def log(msg: str) -> None:
@@ -114,6 +114,7 @@ ACTIVE_KEY_INDEX = 0
 TELEGRAM_BOT_TOKEN = get_secret("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = get_secret("TELEGRAM_CHAT_ID")
 RENDER_APP_URL = get_secret("RENDER_APP_URL") or get_secret("RENDER_EXTERNAL_URL")
+NSE_PROXY_URL = get_secret("NSE_PROXY_URL")  # Optional Indian residential proxy if Render IP is hard-blocked
 
 PORT = int(get_secret("PORT", "10000"))
 SELF_PING_INTERVAL_SECONDS = 600
@@ -138,15 +139,15 @@ _last_model_resolution_attempt = 0.0
 
 MAX_EVALUATIONS_PER_CYCLE = int(get_secret("MAX_EVALUATIONS_PER_CYCLE", "50"))
 GEMINI_DAILY_CALL_BUDGET = int(get_secret("GEMINI_DAILY_CALL_BUDGET", "300"))
-GEMINI_USAGE_PATH = "gemini_usage.json"
-SEEN_ANNOUNCEMENTS_PATH = "seen_announcements.json"
+GEMINI_USAGE_PATH = data_path("gemini_usage.json")
+SEEN_ANNOUNCEMENTS_PATH = data_path("seen_announcements.json")
 
 CYCLE_COUNTER = 0
 
 # ============================================================================
 # SQLITE3 F&O REPOSITORY & ADVANCED NORMALIZER
 # ============================================================================
-FO_DB_PATH = "nse_fno.db"
+FO_DB_PATH = data_path("nse_fno.db")
 FO_CSV_PATH = "NseFnoLotSize.csv"
 
 SYMBOL_ALIASES = {
@@ -288,7 +289,6 @@ def get_nse_equity_master(force_refresh: bool = False) -> dict:
         return _NSE_EQUITY_MASTER
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
         "Accept": "text/csv,*/*",
         "Referer": "https://www.nseindia.com/",
     }
@@ -303,9 +303,10 @@ def get_nse_equity_master(force_refresh: bool = False) -> dict:
                 csv_text = f.read()
 
         if not csv_text:
+            session = get_nse_session()
             for url in NSE_EQUITY_MASTER_URLS:
                 try:
-                    response = requests.get(url, headers=headers, timeout=20)
+                    response = session.get(url, headers=headers, timeout=20)
                     if response.status_code == 200 and "SYMBOL" in response.text.upper() and "COMPANY" in response.text.upper():
                         csv_text = response.content.decode("utf-8-sig", errors="replace")
                         tmp_path = NSE_EQUITY_MASTER_PATH + ".tmp"
@@ -313,7 +314,7 @@ def get_nse_equity_master(force_refresh: bool = False) -> dict:
                             f.write(csv_text)
                         os.replace(tmp_path, NSE_EQUITY_MASTER_PATH)
                         break
-                except requests.RequestException:
+                except Exception:
                     continue
 
         if not csv_text:
@@ -481,43 +482,49 @@ def get_fno_total_count() -> int:
 # NSE DIRECT BROWSER IMPERSONATION & COOKIES MANAGER (curl_cffi)
 # ============================================================================
 NSE_RSS_URL = "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml"
-NSE_HOME_URL = "https://www.nseindia.com"
+NSE_WARMUP_URLS = [
+    "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
+    "https://www.nseindia.com",
+]
 
 nse_http_session = None
 last_cookie_refresh = 0.0
 COOKIE_EXPIRY_SECONDS = 1800
 
 
+def _create_impersonated_session():
+    proxies = {"http": NSE_PROXY_URL, "https": NSE_PROXY_URL} if NSE_PROXY_URL else None
+    return crequests.Session(impersonate="chrome", proxies=proxies)
+
+
 def refresh_nse_session() -> bool:
     global nse_http_session, last_cookie_refresh
-    try:
-        session = crequests.Session(impersonate="chrome120")
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.google.com/",
-            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "cross-site",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1",
-        }
+    # Always keep an active curl_cffi session so nsearchives RSS can still be attempted
+    # even if www.nseindia.com returns 403 on cloud datacenter IPs.
+    session = _create_impersonated_session()
+    nse_http_session = session
 
-        resp = session.get(NSE_HOME_URL, headers=headers, timeout=20)
-        if resp.status_code == 200:
-            nse_http_session = session
-            last_cookie_refresh = time.time()
-            log(f"🍪 NSE Cookies generated successfully ({len(session.cookies)} cached).")
-            return True
-        else:
-            log(f"⚠️ NSE Homepage returned status {resp.status_code}")
-            return False
-    except Exception as e:
-        log(f"❌ Failed to establish NSE cookie session: {e}")
-        return False
+    headers = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/",
+        "Upgrade-Insecure-Requests": "1",
+    }
+
+    for url in NSE_WARMUP_URLS:
+        try:
+            resp = session.get(url, headers=headers, timeout=20)
+            if resp.status_code == 200:
+                last_cookie_refresh = time.time()
+                log(f"🍪 NSE Cookies generated via {url} ({len(session.cookies)} cached).")
+                return True
+            else:
+                log(f"⚠️ Warmup URL ({url}) returned status {resp.status_code}")
+        except Exception as e:
+            log(f"⚠️ Warmup request failed ({url}): {e}")
+
+    last_cookie_refresh = time.time()
+    return False
 
 
 def get_nse_session():
@@ -525,13 +532,15 @@ def get_nse_session():
     now = time.time()
     if nse_http_session is None or (now - last_cookie_refresh) > COOKIE_EXPIRY_SECONDS:
         refresh_nse_session()
+    if nse_http_session is None:
+        nse_http_session = _create_impersonated_session()
     return nse_http_session
 
 
 # ============================================================================
 # NON-INTRUSIVE PDF HIGHLIGHTS & FINANCIAL/ORDER EXTRACTOR
 # ============================================================================
-PDF_DOWNLOAD_DIR = "nse_pdf_cache"
+PDF_DOWNLOAD_DIR = data_path("nse_pdf_cache")
 os.makedirs(PDF_DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -819,10 +828,12 @@ def resolve_gemini_model(force: bool = False) -> bool:
                 log(f"✅ Connected to Gemini model '{candidate}' using Key index {ACTIVE_KEY_INDEX + 1}")
                 return True
             except Exception as e:
+                err_short = str(e).splitlines()[0][:180]
                 if _is_quota_exhausted(e):
-                    log(f"⚠️ Key index {ACTIVE_KEY_INDEX + 1} quota hit during model test.")
+                    log(f"⚠️ Key index {ACTIVE_KEY_INDEX + 1} quota hit on '{candidate}': {err_short}")
                     rotate_gemini_key("Quota during resolution")
                     break
+                log(f"⚠️ Key index {ACTIVE_KEY_INDEX + 1} failed on '{candidate}': {err_short}")
                 continue
 
         keys_tested += 1
@@ -839,10 +850,10 @@ Analyze the following corporate announcements from the National Stock Exchange (
 
 CRITICAL TASK:
 1. Identify the EXACT OFFICIAL NSE CASH-EQUITY TICKER SYMBOL for the company named in the announcement.
-   - Resolve the company from the announcement title and description; use the attachment URL only as supporting context.
-   - NEVER assume the first word of a PDF/XML filename is the stock symbol. Filing IDs, trust names and internal codes are not stock symbols.
-   - Return a symbol only when the company-to-symbol mapping is clear. If uncertain or the announcement is not about a listed equity, return an empty string.
-   - Use official NSE symbols in CAPS (for example RELIANCE, PAYTM, LICI, INFY, LT). Do not return a company name.
+  - Resolve the company from the announcement title and description; use the attachment URL only as supporting context.
+  - NEVER assume the first word of a PDF/XML filename is the stock symbol. Filing IDs, trust names and internal codes are not stock symbols.
+  - Return a symbol only when the company-to-symbol mapping is clear. If uncertain or the announcement is not about a listed equity, return an empty string.
+  - Use official NSE symbols in CAPS (for example RELIANCE, PAYTM, LICI, INFY, LT). Do not return a company name.
 2. Classify impact into HIGH, MEDIUM, or LOW.
 
 HIGH IMPACT CRITERIA:
@@ -1055,15 +1066,10 @@ def _extract_initial_symbol_hint(title: str, link: str) -> str:
 
 def fetch_nse_announcements(max_retries: int = 3) -> list:
     session = get_nse_session()
-    if session is None:
-        return []
 
     rss_headers = {
         "Accept": "application/xml,text/xml,*/*",
         "Referer": "https://www.nseindia.com/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
     }
 
     for attempt in range(1, max_retries + 1):
@@ -1071,12 +1077,14 @@ def fetch_nse_announcements(max_retries: int = 3) -> list:
             resp = session.get(NSE_RSS_URL, headers=rss_headers, timeout=25)
 
             if resp.status_code in (401, 403):
+                log(f"⚠️ NSE RSS returned HTTP {resp.status_code} (attempt {attempt}/{max_retries})")
                 refresh_nse_session()
                 session = get_nse_session()
                 time.sleep(2)
                 continue
 
             if resp.status_code != 200:
+                log(f"⚠️ NSE RSS returned unexpected status {resp.status_code} (attempt {attempt}/{max_retries})")
                 time.sleep(2)
                 continue
 
@@ -1100,9 +1108,11 @@ def fetch_nse_announcements(max_retries: int = 3) -> list:
             log(f"Fetched {len(announcements)} announcement(s) directly from NSE RSS XML.")
             return announcements
 
-        except ET.ParseError:
+        except ET.ParseError as e:
+            log(f"⚠️ NSE RSS XML parse failed: {e}")
             return []
-        except Exception:
+        except Exception as e:
+            log(f"⚠️ NSE RSS request failed (attempt {attempt}/{max_retries}): {e}")
             time.sleep(2)
 
     return []
@@ -1574,4 +1584,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
