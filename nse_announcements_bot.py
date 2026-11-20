@@ -10,7 +10,7 @@ Original file is located at
 
 
 # pdf + old code & Stock Symbol
-# updated code for >>> stock symbol data >>>  03 Nov >> 20 Nov💥
+# updated code for >>> stock symbol data >>>  03 Nov >>💥
 # NSE Corporate Announcements Bot - Gemini-Powered Scrip & F&O Resolver Edition + PDF Highlights Extractor
 """   Dated 04Nov ...Updated ON 11 th NOV
 
@@ -23,7 +23,7 @@ NSE Corporate Announcements Bot — Institutional Telegram Alert Engine
 - TLS/JA3 Browser Spoofing via curl_cffi
 - Multi-Key Fallback Engine for Gemini API (Key 1 -> Key 2 -> Key 3)
 - 2-Hour Automated Periodic Health & Quota Dispatcher
-- Interactive Telegram Menu (hi/menu/status): Interval, Batch Size & News Filters
+- Interactive Telegram Menu (hi/menu/status): Interval & Batch Size Controls
 ================================================================================
 """
 
@@ -63,14 +63,14 @@ try:
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
-
+# added Github code 
 # Render Data Directory
 DATA_DIR = os.getenv("DATA_DIR", ".")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-
 def data_path(filename):
     return os.path.join(DATA_DIR, filename)
+
 
 
 def log(msg: str) -> None:
@@ -114,7 +114,6 @@ ACTIVE_KEY_INDEX = 0
 TELEGRAM_BOT_TOKEN = get_secret("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = get_secret("TELEGRAM_CHAT_ID")
 RENDER_APP_URL = get_secret("RENDER_APP_URL") or get_secret("RENDER_EXTERNAL_URL")
-NSE_PROXY_URL = get_secret("NSE_PROXY_URL")  # Optional Indian residential proxy if Render IP is blocked
 
 PORT = int(get_secret("PORT", "10000"))
 SELF_PING_INTERVAL_SECONDS = 600
@@ -139,21 +138,15 @@ _last_model_resolution_attempt = 0.0
 
 MAX_EVALUATIONS_PER_CYCLE = int(get_secret("MAX_EVALUATIONS_PER_CYCLE", "50"))
 GEMINI_DAILY_CALL_BUDGET = int(get_secret("GEMINI_DAILY_CALL_BUDGET", "300"))
-GEMINI_USAGE_PATH = data_path("gemini_usage.json")
-SEEN_ANNOUNCEMENTS_PATH = data_path("seen_announcements.json")
-USER_PREFS_PATH = data_path("user_preferences.json")
-NEWS_CACHE_PATH = data_path("recent_announcements_cache.json")
-MAX_CACHED_ANNOUNCEMENTS = 150
+GEMINI_USAGE_PATH = "gemini_usage.json"
+SEEN_ANNOUNCEMENTS_PATH = "seen_announcements.json"
 
 CYCLE_COUNTER = 0
-_CYCLE_LOCK = threading.Lock()
-_PREFS_LOCK = threading.Lock()
-_CACHE_LOCK = threading.Lock()
 
 # ============================================================================
 # SQLITE3 F&O REPOSITORY & ADVANCED NORMALIZER
 # ============================================================================
-FO_DB_PATH = data_path("nse_fno.db")
+FO_DB_PATH = "nse_fno.db"
 FO_CSV_PATH = "NseFnoLotSize.csv"
 
 SYMBOL_ALIASES = {
@@ -168,231 +161,90 @@ SYMBOL_ALIASES = {
     "BANK NIFTY": "BANKNIFTY"
 }
 
-BUILTIN_FO_CATALOG = {    
-    "BANKNIFTY": ("Nifty Bank", 30),
-    "FINNIFTY": ("Finnifty", 60),
-    "MIDCPNIFTY": ("Nifty Midcap Select", 120),
-    "NIFTY": ("Nifty 50", 65),
-    "NIFTYFPI": ("Nifty FPI 150", 1100),
-    "NIFTYNXT50": ("Nifty Next 50", 25),
-    "360ONE": ("360 One WAM", 500),
-    "ABB": ("ABB", 125),
-    "ABCAPITAL": ("Aditya Birla Capital", 1550),
-    "ADANIENSOL": ("Adani Energy Solutions", 675),
-    "ADANIENT": ("Adani Enterprises", 309),
-    "ADANIGREEN": ("Adani Green Energy", 600),
-    "ADANIPORTS": ("Adani Ports & SEZ", 475),
-    "ADANIPOWER": ("Adani Power", 3550),
-    "ALKEM": ("Alkem Laboratories", 125),
-    "AMBER": ("Amber Enterprises", 100),
-    "AMBUJACEM": ("Ambuja Cements", 1200),
-    "ANANDRATHI": ("Anand Rathi Wealth", 250),
-    "ANGELONE": ("Angel One", 2500),
-    "APLAPOLLO": ("APL Apollo Tubes", 350),
-    "APOLLOHOSP": ("Apollo Hospitals", 125),
-    "ASHOKLEY": ("Ashok Leyland", 5000),
-    "ASIANPAINT": ("Asian Paints", 250),
-    "ASTRAL": ("Astral", 425),
-    "ATHERENERG": ("Ather Energy", 375),
-    "AUBANK": ("AU Small Finance Bank", 500),
-    "AUROPHARMA": ("Aurobindo Pharma", 550),
-    "AXISBANK": ("Axis Bank", 625),
-    "BAJAJ-AUTO": ("Bajaj Auto", 75),
-    "BAJAJFINSV": ("Bajaj Finserv", 300),
-    "BAJFINANCE": ("Bajaj Finance", 750),
-    "BANDHANBNK": ("Bandhan Bank", 3600),
-    "BANKBARODA": ("Bank of Baroda", 2925),
-    "BANKINDIA": ("Bank of India", 5200),
-    "BDL": ("Bharat Dynamics", 425),
-    "BEL": ("Bharat Electronics", 1425),
-    "BHARATFORG": ("Bharat Forge", 500),
-    "BHARTIARTL": ("Bharti Airtel", 475),
-    "BHEL": ("Bharat Heavy Electricals", 2625),
-    "BIOCON": ("Biocon", 2500),
-    "BLUESTARCO": ("Blue Star", 325),
-    "BOSCHLTD": ("Bosch", 25),
-    "BPCL": ("Bharat Petroleum", 1975),
-    "BRITANNIA": ("Britannia Industries", 125),
-    "BSE": ("BSE", 200),
-    "CAMS": ("CAMS", 825),
-    "CANBK": ("Canara Bank", 6750),
-    "CDSL": ("CDSL", 475),
-    "CGPOWER": ("CG Power & Industrial Solutions", 850),
-    "CHOLAFIN": ("Cholamandalam Investment", 625),
-    "CIPLA": ("Cipla", 425),
-    "COALINDIA": ("Coal India", 1350),
-    "COCHINSHIP": ("Cochin Shipyard", 400),
-    "COFORGE": ("Coforge", 475),
-    "COLPAL": ("Colgate Palmolive", 275),
-    "CONCOR": ("Container Corporation of India", 1250),
-    "COROMANDEL": ("Coromandel International", 300),
-    "CROMPTON": ("Crompton Greaves", 2150),
-    "CUB": ("City Union Bank", 2325),
-    "CUMMINSIND": ("Cummins", 100),
-    "DABUR": ("Dabur India", 1250),
-    "DATAPATTNS": ("Data Patterns", 125),
-    "DELHIVERY": ("Delhivery", 2075),
-    "DIVISLAB": ("Divis Laboratories", 100),
-    "DIXON": ("Dixon Technologies", 50),
-    "DLF": ("DLF", 950),
-    "DMART": ("Avenue Supermarts DMart", 150),
-    "DRREDDY": ("Dr Reddys Laboratories", 625),
-    "EICHERMOT": ("Eicher Motors", 100),
-    "ENRIN": ("Siemens Energy", 175),
-    "ETERNAL": ("Eternal", 2425),
-    "FEDERALBNK": ("Federal Bank", 2500),
-    "FORCEMOT": ("Force Motors", 25),
-    "FORTIS": ("Fortis Healthcare", 775),
-    "GAIL": ("GAIL", 3550),
-    "GLENMARK": ("Glenmark Pharmaceuticals", 375),
-    "GMRAIRPORT": ("GMR Airports", 6975),
-    "GODFRYPHLP": ("Godfrey Phillips", 275),
-    "GODREJCP": ("Godrej Consumer Products", 500),
-    "GODREJPROP": ("Godrej Properties", 325),
-    "GRASIM": ("Grasim Industries", 250),
-    "GVT&D": ("GE Vernova T&D", 125),
-    "HAL": ("Hindustan Aeronautics", 150),
-    "HAVELLS": ("Havells", 500),
-    "HCLTECH": ("HCL Technologies", 400),
-    "HDFCAMC": ("HDFC AMC", 300),
-    "HDFCBANK": ("HDFC Bank", 650),
-    "HDFCLIFE": ("HDFC Life Insurance", 1100),
-    "HEROMOTOCO": ("Hero Motocorp", 150),
-    "HINDALCO": ("Hindalco Industries", 700),
-    "HINDPETRO": ("Hindustan Petroleum", 2025),
-    "HINDUNILVR": ("Hindustan Unilever", 300),
-    "HINDZINC": ("Hindustan Zinc", 1225),
-    "HYUNDAI": ("Hyundai Motor India", 275),
-    "ICICIBANK": ("ICICI Bank", 700),
-    "ICICIGI": ("ICICI Lombard General Insurance", 325),
-    "ICICILIFE": ("ICICI Life Insurance", 925),
-    "IDEA": ("Vodafone Idea", 71475),
-    "IDFCFIRSTB": ("IDFC First Bank", 9275),
-    "IEX": ("Indian Energy Exchange", 4350),
-    "INDHOTEL": ("Indian Hotels Company", 1000),
-    "INDIANB": ("Indian Bank", 1000),
-    "INDIGO": ("Interglobe Aviation", 150),
-    "INDUSINDBK": ("Indusind Bank", 700),
-    "INDUSTOWER": ("Indus Towers", 1700),
-    "INFY": ("Infosys", 400),
-    "INOXWIND": ("Inox Wind", 6400),
-    "IOC": ("Indian Oil Corporation", 4875),
-    "IREDA": ("IREDA", 4525),
-    "IRFC": ("IRFC", 5425),
-    "ITC": ("ITC", 1725),
-    "JINDALSTEL": ("Jindal Steel", 625),
-    "JIOFIN": ("Jio Financial Services", 2350),
-    "JSWENERGY": ("JSW Energy", 1075),
-    "JSWSTEEL": ("JSW Steel", 675),
-    "JUBLFOOD": ("Jubilant FoodWorks", 1250),
-    "KALYANKJIL": ("Kalyan Jewellers", 1350),
-    "KARURVYSYA": ("Karur Vysya Bank", 1550),
-    "KAYNES": ("Kaynes Technology India", 150),
-    "KEI": ("KEI Industries", 175),
-    "KFINTECH": ("KFin Technologies", 575),
-    "KOTAKBANK": ("Kotak Bank", 2000),
-    "KPITTECH": ("KPIT Technologies", 775),
-    "LAURUSLABS": ("Laurus Labs", 425),
-    "LICHSGFIN": ("LIC Housing Finance", 1000),
-    "LICI": ("LIC of India", 1400),
-    "LODHA": ("Lodha Developers", 625),
-    "LT": ("Larsen & Toubro", 175),
-    "LTF": ("L&T Finance", 2250),
-    "LTM": ("LTM", 150),
-    "LUPIN": ("Lupin", 425),
-    "M&M": ("Mahindra & Mahindra", 200),
-    "MAHABANK": ("Bank of Maharashtra", 6500),
-    "MANAPPURAM": ("Manappuram Finance", 3000),
-    "MANKIND": ("Mankind Pharma", 250),
-    "MARICO": ("Marico", 1200),
-    "MARUTI": ("Maruti Suzuki", 50),
-    "MAXHEALTH": ("Max Healthcare Institute", 525),
-    "MAZDOCK": ("Mazagon Dock Shipbuilders", 225),
-    "MCX": ("MCX", 225),
-    "MFSL": ("Max Financial Services", 400),
-    "MOTHERSON": ("Samvardhana Motherson International", 6150),
-    "MOTILALOFS": ("Motilal Oswal Financial Services", 775),
-    "MPHASIS": ("Mphasis", 275),
-    "MUTHOOTFIN": ("Muthoot Finance", 275),
-    "NAM-INDIA": ("Nippon Life India AMC", 625),
-    "NATIONALUM": ("NALCO", 1875),
-    "NAUKRI": ("Info Edge", 550),
-    "NAVINFLUOR": ("Navin Fluorine International", 75),
-    "NBCC": ("NBCC", 6500),
-    "NESTLEIND": ("Nestle", 500),
-    "NHPC": ("NHPC", 6950),
-    "NMDC": ("NMDC", 6750),
-    "NTPC": ("NTPC", 1500),
-    "NYKAA": ("Nykaa", 3125),
-    "OBEROIRLTY": ("Oberoi Realty", 350),
-    "OFSS": ("Oracle Financial Services Software", 50),
-    "OIL": ("Oil India", 1400),
-    "ONGC": ("Oil & Natural Gas Corporation", 2250),
-    "PAGEIND": ("Page Industries", 20),
-    "PATANJALI": ("Patanjali Foods", 1075),
-    "PAYTM": ("One 97 Communications", 725),
-    "PERSISTENT": ("Persistent Systems", 125),
-    "PETRONET": ("Petronet LNG", 1900),
-    "PFC": ("Power Finance Corporation", 1300),
-    "PGEL": ("PG Electroplast", 950),
-    "PHOENIXLTD": ("Phoenix Mills", 350),
-    "PIDILITIND": ("Pidilite Industries", 500),
-    "PIIND": ("PI Industries", 175),
-    "PNB": ("Punjab National Bank", 8000),
-    "PNBHOUSING": ("PNB Housing Finance", 650),
-    "POLICYBZR": ("PB FinTech", 350),
-    "POLYCAB": ("Polycab", 125),
-    "POWERGRID": ("Power Grid Corporation of India", 1900),
-    "POWERINDIA": ("Hitachi Energy", 25),
-    "PREMIERENE": ("Premier Energies", 650),
-    "PRESTIGE": ("Prestige Estates Projects", 450),
-    "RADICO": ("Radico Khaitan", 150),
-    "RBLBANK": ("RBL Bank", 3175),
-    "RECLTD": ("REC", 1575),
-    "RELIANCE": ("Reliance Industries", 500),
-    "RVNL": ("Rail Vikas Nigam", 1925),
-    "SAGILITY": ("Sagility", 12000),
-    "SAIL": ("Steel Authority of India", 4700),
-    "SBICARD": ("SBI Cards", 800),
-    "SBILIFE": ("SBI Life Insurance", 375),
-    "SBIN": ("State Bank of India", 750),
-    "SHREECEM": ("Shree Cement", 25),
-    "SHRIRAMFIN": ("Shriram Finance", 825),
-    "SIEMENS": ("Siemens", 175),
-    "SOLARINDS": ("Solar Industries", 25),
-    "SONACOMS": ("Sona BLW Precision Forgings", 1225),
-    "SRF": ("SRF", 200),
-    "SUNPHARMA": ("Sun Pharmaceutical", 350),
-    "SUPREMEIND": ("Supreme Industries", 175),
-    "SUZLON": ("Suzlon Energy", 12700),
-    "SWIGGY": ("Swiggy", 1825),
-    "SYRMA": ("Syrma SGS", 325),
-    "TATACONSUM": ("Tata Consumer Products", 550),
-    "TATAELXSI": ("Tata Elxsi", 125),
-    "TATAPOWER": ("Tata Power", 1450),
-    "TATASTEEL": ("Tata Steel", 2750),
-    "TCS": ("Tata Consultancy Services", 225),
-    "TECHM": ("Tech Mahindra", 600),
-    "TIINDIA": ("Tube Investment", 200),
-    "TITAN": ("Titan", 175),
-    "TMPV": ("Tata Motors Passenger Vehicles", 1600),
-    "TORNTPHARM": ("Torrent Pharmaceuticals", 125),
-    "TRENT": ("Trent", 225),
-    "TVSMOTOR": ("TVS Motors", 175),
-    "UJJIVANSFB": ("Ujjivan Small Finance Bank", 8000),
-    "ULTRACEMCO": ("UltraTech Cement", 50),
-    "UNIONBANK": ("Union Bank of India", 4425),
-    "UNITDSPR": ("United Spirits", 400),
-    "UNOMINDA": ("UNO Minda", 550),
-    "UPL": ("UPL", 1355),
-    "VBL": ("Varun Beverages", 1275),
-    "VEDL": ("Vedanta", 1150),
-    "VMM": ("Vishal Mega Mart", 4850),
-    "VOLTAS": ("Voltas", 375),
-    "WAAREEENER": ("Waaree Energies", 175),
-    "WIPRO": ("Wipro", 3000),
-    "YESBANK": ("Yes Bank", 31100),
-    "ZYDUSLIFE": ("Zydus Lifesciences", 450)
+BUILTIN_FO_CATALOG = {
+    "360ONE": ("360 One WAM", 500), "ABB": ("ABB", 125), "ABCAPITAL": ("Aditya Birla Capital", 1550),
+    "ADANIENSOL": ("Adani Energy Solutions", 675), "ADANIENT": ("Adani Enterprises", 309),
+    "ADANIGREEN": ("Adani Green Energy", 600), "ADANIPORTS": ("Adani Ports & SEZ", 475),
+    "ADANIPOWER": ("Adani Power", 3550), "ALKEM": ("Alkem Laboratories", 100),
+    "AMBER": ("Amber Enterprises", 100), "AMBUJACEM": ("Ambuja Cements", 900),
+    "ANGELONE": ("Angel One", 175), "APLAPOLLO": ("APL Apollo Tubes", 350),
+    "APOLLOHOSP": ("Apollo Hospitals", 75), "APOLLOTYRE": ("Apollo Tyres", 1150),
+    "ASHOKLEY": ("Ashok Leyland", 2500), "ASIANPAINT": ("Asian Paints", 200),
+    "ASTRAL": ("Astral", 275), "ATGL": ("Adani Total Gas", 875), "AUBANK": ("AU Small Finance Bank", 1000),
+    "AUROPHARMA": ("Aurobindo Pharma", 400), "AXISBANK": ("Axis Bank", 625),
+    "BAJAJ-AUTO": ("Bajaj Auto", 75), "BAJAJFINSV": ("Bajaj Finserv", 250),
+    "BAJAJHLDNG": ("Bajaj Holdings & Inv", 50), "BAJFINANCE": ("Bajaj Finance", 125),
+    "BALKRISIND": ("Balkrishna Industries", 200), "BANDHANBNK": ("Bandhan Bank", 2700),
+    "BANKBARODA": ("Bank of Baroda", 2425), "BANKINDIA": ("Bank of India", 4800),
+    "BANKNIFTY": ("Nifty Bank", 30), "BDL": ("Bharat Dynamics", 400), "BEL": ("Bharat Electronics", 1900),
+    "BERGEPAINT": ("Berger Paints", 1100), "BHARATFORG": ("Bharat Forge", 500),
+    "BHARTIARTL": ("Bharti Airtel", 475), "BHEL": ("BHEL", 2625), "BIOCON": ("Biocon", 1750),
+    "BOSCHLTD": ("Bosch", 20), "BPCL": ("BPCL", 1800), "BRITANNIA": ("Britannia Industries", 100),
+    "BSE": ("BSE", 375), "CANBK": ("Canara Bank", 5400), "CANFINHOME": ("Can Fin Homes", 650),
+    "CDSL": ("CDSL", 375), "CHAMBLFERT": ("Chambal Fertilisers", 1100), "CHOLAFIN": ("Cholamandalam Inv", 400),
+    "CIPLA": ("Cipla", 375), "COALINDIA": ("Coal India", 1350), "COFORGE": ("Coforge", 150),
+    "COLPAL": ("Colgate-Palmolive", 175), "CONCOR": ("Container Corp", 800), "COROMANDEL": ("Coromandel Intl", 350),
+    "CROMPTON": ("Crompton Greaves CE", 1500), "CUMMINSIND": ("Cummins India", 150),
+    "CYIENT": ("Cyient", 275), "DABUR": ("Dabur India", 1250), "DALBHARAT": ("Dalmia Bharat", 325),
+    "DEEPAKNTR": ("Deepak Nitrite", 250), "DELHIVERY": ("Delhivery", 1350), "DIVISLAB": ("Divi's Lab", 100),
+    "DIXON": ("Dixon Technologies", 50), "DLF": ("DLF", 825), "DMART": ("Avenue Supermarts", 125),
+    "DRREDDY": ("Dr. Reddy's Lab", 625), "EICHERMOT": ("Eicher Motors", 100), "ESCORTS": ("Escorts Kubota", 150),
+    "EXIDEIND": ("Exide Industries", 1400), "FEDERALBNK": ("Federal Bank", 5000), "FINNIFTY": ("Finnifty", 60),
+    "FORTIS": ("Fortis Healthcare", 775), "GAIL": ("GAIL", 3250), "GLENMARK": ("Glenmark Pharma", 375),
+    "GMRAIRPORT": ("GMR Airports Infra", 6550), "GNFC": ("GNFC", 1000), "GODREJCP": ("Godrej Consumer", 500),
+    "GODREJPROP": ("Godrej Properties", 225), "GRANULES": ("Granules India", 1000),
+    "GRASIM": ("Grasim Industries", 250), "GUJGASLTD": ("Gujarat Gas", 1250), "HAL": ("Hindustan Aeronautics", 150),
+    "HAVELLS": ("Havells India", 325), "HCLTECH": ("HCL Technologies", 350), "HDFCAMC": ("HDFC AMC", 150),
+    "HDFCBANK": ("HDFC Bank", 550), "HDFCLIFE": ("HDFC Life Insurance", 1100),
+    "HEROMOTOCO": ("Hero MotoCorp", 150), "HINDALCO": ("Hindalco Industries", 700),
+    "HINDCOPPER": ("Hindustan Copper", 2325), "HINDPETRO": ("HPCL", 2025), "HINDUNILVR": ("Hindustan Unilever", 300),
+    "HUDCO": ("HUDCO", 2800), "ICICIBANK": ("ICICI Bank", 700), "ICICIGI": ("ICICI Lombard", 275),
+    "ICICIPRULI": ("ICICI Pru Life", 925), "IDEA": ("Vodafone Idea", 45000), "IDFCFIRSTB": ("IDFC First Bank", 7500),
+    "IEX": ("Indian Energy Exchange", 3750), "IGL": ("Indraprastha Gas", 1550), "INDHOTEL": ("Indian Hotels", 1000),
+    "INDIAMART": ("IndiaMART InterMESH", 200), "INDIANB": ("Indian Bank", 1000), "INDIGO": ("InterGlobe Aviation", 150),
+    "INDUSINDBK": ("IndusInd Bank", 500), "INDUSTOWER": ("Indus Towers", 1700), "INFY": ("Infosys", 400),
+    "IOC": ("IOC", 4875), "IPCALAB": ("IPCA Laboratories", 425), "IRB": ("IRB Infrastructure", 8700),
+    "IRCTC": ("IRCTC", 625), "IRFC": ("IRFC", 3500), "ITC": ("ITC", 1600), "JINDALSTEL": ("Jindal Steel", 625),
+    "JIOFIN": ("Jio Financial Services", 1950), "JKCEMENT": ("JK Cement", 125), "JSWENERGY": ("JSW Energy", 800),
+    "JSWSTEEL": ("JSW Steel", 675), "JUBLFOOD": ("Jubilant FoodWorks", 1000), "KALYANKJIL": ("Kalyan Jewellers", 950),
+    "KEI": ("KEI Industries", 125), "KOTAKBANK": ("Kotak Mahindra Bank", 400), "KPITTECH": ("KPIT Technologies", 300),
+    "LALPATHLAB": ("Dr. Lal PathLabs", 175), "LAURUSLABS": ("Laurus Labs", 1100),
+    "LICHSGFIN": ("LIC Housing Finance", 1000), "LICI": ("LIC of India", 1400), "LODHA": ("Macrotech Developers", 400),
+    "LT": ("Larsen & Toubro", 150), "LTF": ("L&T Finance", 3362), "LTIM": ("LTIMindtree", 150),
+    "LTTS": ("L&T Tech Services", 100), "LUPIN": ("Lupin", 250), "M&M": ("Mahindra & Mahindra", 200),
+    "M&MFIN": ("M&M Financial", 2000), "MANAPPURAM": ("Manappuram Finance", 3000), "MARICO": ("Marico", 900),
+    "MARUTI": ("Maruti Suzuki", 50), "MAXHEALTH": ("Max Healthcare", 550), "MCX": ("MCX", 125),
+    "METROPOLIS": ("Metropolis Healthcare", 250), "MFSL": ("Max Financial Services", 400),
+    "MIDCPNIFTY": ("Nifty Midcap Select", 120), "MOTHERSON": ("Samvardhana Motherson", 3650),
+    "MPHASIS": ("MphasiS", 175), "MRF": ("MRF", 5), "MUTHOOTFIN": ("Muthoot Finance", 350),
+    "NATIONALUM": ("National Aluminium", 3750), "NAUKRI": ("Info Edge", 75), "NAVINFLUOR": ("Navin Fluorine", 150),
+    "NBCC": ("NBCC India", 5650), "NCC": ("NCC", 2100), "NESTLEIND": ("Nestle India", 250),
+    "NHPC": ("NHPC", 7250), "NIFTY": ("Nifty 50", 65), "NIFTYFPI": ("Nifty FPI 150", 1100),
+    "NIFTYNXT50": ("Nifty Next 50", 25), "NMDC": ("NMDC", 2700), "NTPC": ("NTPC", 1500),
+    "OBEROIRLTY": ("Oberoi Realty", 350), "OFSS": ("Oracle Fin Services", 50), "OIL": ("Oil India", 1400),
+    "ONGC": ("ONGC", 2550), "PAGEIND": ("Page Industries", 15), "PATANJALI": ("Patanjali Foods", 300),
+    "PAYTM": ("One97 Communications", 775), "PEL": ("Piramal Enterprises", 550),
+    "PERSISTENT": ("Persistent Systems", 100), "PETRONET": ("Petronet LNG", 1800), "PFC": ("Power Finance Corp", 1300),
+    "PHOENIXLTD": ("Phoenix Mills", 350), "PIDILITIND": ("Pidilite Industries", 250), "PIIND": ("PI Industries", 125),
+    "PNB": ("Punjab National Bank", 5000), "PNBHOUSING": ("PNB Housing Finance", 650),
+    "POLICYBZR": ("PB FinTech", 350), "POLYCAB": ("Polycab India", 100), "POONAWALLA": ("Poonawalla Fincorp", 1450),
+    "POWERGRID": ("Power Grid Corp", 1950), "PRESTIGE": ("Prestige Estates", 350), "PVRINOX": ("PVR INOX", 350),
+    "RAMCOCEM": ("The Ramco Cements", 600), "RBLBANK": ("RBL Bank", 3125), "RECLTD": ("REC", 1250),
+    "RELIANCE": ("Reliance Industries", 250), "SAIL": ("SAIL", 5000), "SBICARD": ("SBI Cards", 800),
+    "SBILIFE": ("SBI Life Insurance", 375), "SBIN": ("State Bank of India", 750), "SHREECEM": ("Shree Cement", 25),
+    "SHRIRAMFIN": ("Shriram Finance", 165), "SIEMENS": ("Siemens", 75), "SOLARINDS": ("Solar Industries", 50),
+    "SONACOMS": ("Sona BLW Precision", 775), "SRF": ("SRF", 200), "SUNPHARMA": ("Sun Pharma", 350),
+    "SUNTV": ("Sun TV Network", 750), "SUPREMEIND": ("Supreme Industries", 125), "SUZLON": ("Suzlon Energy", 8000),
+    "SYNGENE": ("Syngene International", 800), "TATACHEM": ("Tata Chemicals", 550),
+    "TATACOMM": ("Tata Communications", 250), "TATACONSUM": ("Tata Consumer", 550), "TATAELXSI": ("Tata Elxsi", 75),
+    "TATAMOTORS": ("Tata Motors", 700), "TATAPOWER": ("Tata Power", 1450), "TATASTEEL": ("Tata Steel", 5500),
+    "TATATECH": ("Tata Technologies", 550), "TCS": ("TCS", 175), "TECHM": ("Tech Mahindra", 350),
+    "TIINDIA": ("Tube Investments", 150), "TITAGARH": ("Titagarh Rail Systems", 425), "TITAN": ("Titan Company", 175),
+    "TORNTPHARM": ("Torrent Pharma", 250), "TORNTPOWER": ("Torrent Power", 375), "TRENT": ("Trent", 100),
+    "TVSMOTOR": ("TVS Motor Company", 175), "ULTRACEMCO": ("UltraTech Cement", 50),
+    "UNIONBANK": ("Union Bank of India", 4750), "UNITDSPR": ("United Spirits", 400), "UPL": ("UPL", 1300),
+    "VBL": ("Varun Beverages", 875), "VEDL": ("Vedanta", 1150), "VOLTAS": ("Voltas", 350),
+    "WIPRO": ("Wipro", 1500), "YESBANK": ("Yes Bank", 24200), "ZYDUSLIFE": ("Zydus Lifesciences", 450)
 }
 
 
@@ -436,6 +288,7 @@ def get_nse_equity_master(force_refresh: bool = False) -> dict:
         return _NSE_EQUITY_MASTER
 
     headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
         "Accept": "text/csv,*/*",
         "Referer": "https://www.nseindia.com/",
     }
@@ -450,10 +303,9 @@ def get_nse_equity_master(force_refresh: bool = False) -> dict:
                 csv_text = f.read()
 
         if not csv_text:
-            session = get_nse_session()
             for url in NSE_EQUITY_MASTER_URLS:
                 try:
-                    response = session.get(url, headers=headers, timeout=20)
+                    response = requests.get(url, headers=headers, timeout=20)
                     if response.status_code == 200 and "SYMBOL" in response.text.upper() and "COMPANY" in response.text.upper():
                         csv_text = response.content.decode("utf-8-sig", errors="replace")
                         tmp_path = NSE_EQUITY_MASTER_PATH + ".tmp"
@@ -461,7 +313,7 @@ def get_nse_equity_master(force_refresh: bool = False) -> dict:
                             f.write(csv_text)
                         os.replace(tmp_path, NSE_EQUITY_MASTER_PATH)
                         break
-                except Exception:
+                except requests.RequestException:
                     continue
 
         if not csv_text:
@@ -629,49 +481,43 @@ def get_fno_total_count() -> int:
 # NSE DIRECT BROWSER IMPERSONATION & COOKIES MANAGER (curl_cffi)
 # ============================================================================
 NSE_RSS_URL = "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml"
-NSE_WARMUP_URLS = [
-    "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
-    "https://www.nseindia.com",
-]
+NSE_HOME_URL = "https://www.nseindia.com"
 
 nse_http_session = None
 last_cookie_refresh = 0.0
 COOKIE_EXPIRY_SECONDS = 1800
 
 
-def _create_impersonated_session():
-    proxies = {"http": NSE_PROXY_URL, "https": NSE_PROXY_URL} if NSE_PROXY_URL else None
-    return crequests.Session(impersonate="chrome", proxies=proxies)
-
-
 def refresh_nse_session() -> bool:
     global nse_http_session, last_cookie_refresh
-    # Always keep an active curl_cffi session so nsearchives RSS can still be attempted
-    # even if www.nseindia.com returns 403 on cloud datacenter IPs.
-    session = _create_impersonated_session()
-    nse_http_session = session
+    try:
+        session = crequests.Session(impersonate="chrome120")
+        headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.google.com/",
+            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "cross-site",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        }
 
-    headers = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/",
-        "Upgrade-Insecure-Requests": "1",
-    }
-
-    for url in NSE_WARMUP_URLS:
-        try:
-            resp = session.get(url, headers=headers, timeout=20)
-            if resp.status_code == 200:
-                last_cookie_refresh = time.time()
-                log(f"🍪 NSE Cookies generated via {url} ({len(session.cookies)} cached).")
-                return True
-            else:
-                log(f"⚠️ Warmup URL ({url}) returned status {resp.status_code}")
-        except Exception as e:
-            log(f"⚠️ Warmup request failed ({url}): {e}")
-
-    last_cookie_refresh = time.time()
-    return False
+        resp = session.get(NSE_HOME_URL, headers=headers, timeout=20)
+        if resp.status_code == 200:
+            nse_http_session = session
+            last_cookie_refresh = time.time()
+            log(f"🍪 NSE Cookies generated successfully ({len(session.cookies)} cached).")
+            return True
+        else:
+            log(f"⚠️ NSE Homepage returned status {resp.status_code}")
+            return False
+    except Exception as e:
+        log(f"❌ Failed to establish NSE cookie session: {e}")
+        return False
 
 
 def get_nse_session():
@@ -679,15 +525,13 @@ def get_nse_session():
     now = time.time()
     if nse_http_session is None or (now - last_cookie_refresh) > COOKIE_EXPIRY_SECONDS:
         refresh_nse_session()
-    if nse_http_session is None:
-        nse_http_session = _create_impersonated_session()
     return nse_http_session
 
 
 # ============================================================================
 # NON-INTRUSIVE PDF HIGHLIGHTS & FINANCIAL/ORDER EXTRACTOR
 # ============================================================================
-PDF_DOWNLOAD_DIR = data_path("nse_pdf_cache")
+PDF_DOWNLOAD_DIR = "nse_pdf_cache"
 os.makedirs(PDF_DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -995,10 +839,10 @@ Analyze the following corporate announcements from the National Stock Exchange (
 
 CRITICAL TASK:
 1. Identify the EXACT OFFICIAL NSE CASH-EQUITY TICKER SYMBOL for the company named in the announcement.
-  - Resolve the company from the announcement title and description; use the attachment URL only as supporting context.
-  - NEVER assume the first word of a PDF/XML filename is the stock symbol. Filing IDs, trust names and internal codes are not stock symbols.
-  - Return a symbol only when the company-to-symbol mapping is clear. If uncertain or the announcement is not about a listed equity, return an empty string.
-  - Use official NSE symbols in CAPS (for example RELIANCE, PAYTM, LICI, INFY, LT). Do not return a company name.
+   - Resolve the company from the announcement title and description; use the attachment URL only as supporting context.
+   - NEVER assume the first word of a PDF/XML filename is the stock symbol. Filing IDs, trust names and internal codes are not stock symbols.
+   - Return a symbol only when the company-to-symbol mapping is clear. If uncertain or the announcement is not about a listed equity, return an empty string.
+   - Use official NSE symbols in CAPS (for example RELIANCE, PAYTM, LICI, INFY, LT). Do not return a company name.
 2. Classify impact into HIGH, MEDIUM, or LOW.
 
 HIGH IMPACT CRITERIA:
@@ -1202,141 +1046,6 @@ def mark_seen(seen: dict, ann_id: str, symbol: str, status: str) -> None:
 
 
 # ============================================================================
-# NEWS CATEGORIZATION, LOCAL CACHE & USER PREFERENCES ENGINE
-# ============================================================================
-FILTER_CATEGORY_LABELS = {
-    "fno": "F&O Stocks",
-    "cash": "Cash Stocks",
-    "order": "Order Stocks",
-    "result": "Result Stocks",
-    "all": "All Announcements",
-}
-
-
-def classify_news_categories(symbol: str, event_type: str, desc: str) -> list:
-    """Classifies an evaluated announcement into filter categories using existing F&O lookup & keywords."""
-    categories = []
-    segment_label, _ = get_fo_info(symbol)
-    if segment_label == "F&O Active":
-        categories.append("fno")
-    else:
-        categories.append("cash")
-
-    combined_text = f"{event_type or ''} {desc or ''}".lower()
-    if any(k in combined_text for k in ["order", "contract", "work order", "award", "bagged", "loi", "letter of intent"]):
-        categories.append("order")
-
-    if any(k in combined_text for k in ["result", "financial", "earnings", "quarter", "q1", "q2", "q3", "q4", "ufr", "profit", "revenue", "outcome of board"]):
-        categories.append("result")
-
-    return categories
-
-
-def cache_processed_announcement(ann_id: str, record: dict) -> None:
-    """Stores evaluated HIGH/MEDIUM announcements locally so menu filters reuse existing data without extra API calls."""
-    with _CACHE_LOCK:
-        cache = _load_json_safe(NEWS_CACHE_PATH)
-        items = cache.get("items", [])
-        items = [x for x in items if x.get("id") != ann_id]
-        items.insert(0, record)
-        cache["items"] = items[:MAX_CACHED_ANNOUNCEMENTS]
-        _save_json_atomic(NEWS_CACHE_PATH, cache)
-
-
-def get_cached_announcements(category_filter: str = "all", limit: int = 8) -> list:
-    """Retrieves matching announcements from already-fetched local cache."""
-    with _CACHE_LOCK:
-        cache = _load_json_safe(NEWS_CACHE_PATH)
-        items = cache.get("items", [])
-
-    if category_filter == "all":
-        return items[:limit]
-
-    matched = [
-        item for item in items
-        if category_filter in item.get("categories", [])
-    ]
-    return matched[:limit]
-
-
-def load_user_preferences() -> dict:
-    with _PREFS_LOCK:
-        return _load_json_safe(USER_PREFS_PATH)
-
-
-def save_user_preferences(prefs: dict) -> None:
-    with _PREFS_LOCK:
-        _save_json_atomic(USER_PREFS_PATH, prefs)
-
-
-def get_user_pref_entry(chat_id: str) -> dict:
-    cid = str(chat_id)
-    prefs = load_user_preferences()
-    entry = prefs.get(cid)
-    if not isinstance(entry, dict):
-        return {"saved": [], "draft": []}
-    return {
-        "saved": list(entry.get("saved", [])),
-        "draft": list(entry.get("draft", entry.get("saved", []))),
-    }
-
-
-def toggle_user_pref_draft(chat_id: str, category: str) -> list:
-    cid = str(chat_id)
-    prefs = load_user_preferences()
-    entry = prefs.get(cid)
-    if not isinstance(entry, dict):
-        entry = {"saved": [], "draft": []}
-
-    draft = list(entry.get("draft", entry.get("saved", [])))
-    if category == "all":
-        draft = [] if "all" in draft else ["all"]
-    else:
-        if "all" in draft:
-            draft.remove("all")
-        if category in draft:
-            draft.remove(category)
-        else:
-            draft.append(category)
-
-    entry["draft"] = draft
-    prefs[cid] = entry
-    save_user_preferences(prefs)
-    return draft
-
-
-def commit_user_prefs(chat_id: str) -> list:
-    cid = str(chat_id)
-    prefs = load_user_preferences()
-    entry = prefs.get(cid)
-    if not isinstance(entry, dict):
-        entry = {"saved": [], "draft": []}
-    entry["saved"] = list(entry.get("draft", []))
-    prefs[cid] = entry
-    save_user_preferences(prefs)
-    return entry["saved"]
-
-
-def reset_user_prefs(chat_id: str) -> None:
-    cid = str(chat_id)
-    prefs = load_user_preferences()
-    prefs[cid] = {"saved": [], "draft": []}
-    save_user_preferences(prefs)
-
-
-def matches_user_preferences(categories: list, chat_id: str = None) -> bool:
-    """Checks if an announcement matches the user's saved default preferences.
-    If no preference is saved or 'all' is selected, preserves existing default behavior (returns True).
-    """
-    target_chat = str(chat_id or TELEGRAM_CHAT_ID)
-    entry = get_user_pref_entry(target_chat)
-    saved = entry.get("saved", [])
-    if not saved or "all" in saved:
-        return True
-    return any(cat in saved for cat in categories)
-
-
-# ============================================================================
 # DIRECT NSE RSS PARSER
 # ============================================================================
 def _extract_initial_symbol_hint(title: str, link: str) -> str:
@@ -1346,10 +1055,15 @@ def _extract_initial_symbol_hint(title: str, link: str) -> str:
 
 def fetch_nse_announcements(max_retries: int = 3) -> list:
     session = get_nse_session()
+    if session is None:
+        return []
 
     rss_headers = {
         "Accept": "application/xml,text/xml,*/*",
         "Referer": "https://www.nseindia.com/",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
     }
 
     for attempt in range(1, max_retries + 1):
@@ -1357,14 +1071,12 @@ def fetch_nse_announcements(max_retries: int = 3) -> list:
             resp = session.get(NSE_RSS_URL, headers=rss_headers, timeout=25)
 
             if resp.status_code in (401, 403):
-                log(f"⚠️ NSE RSS returned HTTP {resp.status_code} (attempt {attempt}/{max_retries})")
                 refresh_nse_session()
                 session = get_nse_session()
                 time.sleep(2)
                 continue
 
             if resp.status_code != 200:
-                log(f"⚠️ NSE RSS returned unexpected status {resp.status_code} (attempt {attempt}/{max_retries})")
                 time.sleep(2)
                 continue
 
@@ -1388,11 +1100,9 @@ def fetch_nse_announcements(max_retries: int = 3) -> list:
             log(f"Fetched {len(announcements)} announcement(s) directly from NSE RSS XML.")
             return announcements
 
-        except ET.ParseError as e:
-            log(f"⚠️ NSE RSS XML parse failed: {e}")
+        except ET.ParseError:
             return []
-        except Exception as e:
-            log(f"⚠️ NSE RSS request failed (attempt {attempt}/{max_retries}): {e}")
+        except Exception:
             time.sleep(2)
 
     return []
@@ -1475,10 +1185,10 @@ def format_telegram_message(announcement: dict, fields: dict, resolved_symbol: s
     )
 
 
-def send_telegram_message(text: str, reply_markup: dict = None, max_retries: int = 3, chat_id: str = None) -> bool:
+def send_telegram_message(text: str, reply_markup: dict = None, max_retries: int = 3) -> bool:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": str(chat_id or TELEGRAM_CHAT_ID),
+        "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
@@ -1501,30 +1211,10 @@ def send_telegram_message(text: str, reply_markup: dict = None, max_retries: int
     return False
 
 
-def edit_telegram_message(chat_id: str, message_id: int, text: str, reply_markup: dict = None) -> bool:
-    """Edits an existing bot message in place (used for responsive Settings multi-select toggles)."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
-    payload = {
-        "chat_id": str(chat_id),
-        "message_id": message_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False,
-    }
-    if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
-
-    try:
-        r = requests.post(url, data=payload, timeout=REQUEST_TIMEOUT)
-        return r.status_code == 200
-    except requests.exceptions.RequestException:
-        return False
-
-
 # ============================================================================
 # 2-HOUR SUMMARY DISPATCHER
 # ============================================================================
-def send_status_report(title: str = "2 HOUR Periodic Status Report", chat_id: str = None) -> None:
+def send_status_report(title: str = "2 HOUR Periodic Status Report") -> None:
     current_key_masked = f"Key #{ACTIVE_KEY_INDEX + 1} of {len(GEMINI_KEYS_POOL)}" if GEMINI_KEYS_POOL else "None"
     scan_interval_display = f"{CHECK_INTERVAL_SECONDS // 60} mins" if CHECK_INTERVAL_SECONDS < 3600 else f"{CHECK_INTERVAL_SECONDS / 3600:.1f} hrs"
 
@@ -1540,7 +1230,7 @@ def send_status_report(title: str = "2 HOUR Periodic Status Report", chat_id: st
         f"🔄 <b>Total Fetch Cycles Executed:</b> #{CYCLE_COUNTER}\n"
         f"📦 <b>Cached F&O Stocks:</b> {get_fno_total_count()} symbols"
     )
-    send_telegram_message(msg, chat_id=chat_id)
+    send_telegram_message(msg)
 
 
 def start_two_hour_report_thread() -> None:
@@ -1558,93 +1248,16 @@ def start_two_hour_report_thread() -> None:
 
 
 # ============================================================================
-# INTERACTIVE TELEGRAM INLINE MENUS (STOCK NEWS FILTER + SYSTEM CONTROLS)
+# INTERACTIVE TELEGRAM INLINE MENUS
 # ============================================================================
 def get_main_menu_markup() -> dict:
     return {
         "inline_keyboard": [
-            [{"text": "📰 1. NSE Announcements", "callback_data": "menu_nse_announcements"}],
-            [
-                {"text": "📈 2. F&O Stocks", "callback_data": "filter_news_fno"},
-                {"text": "💵 3. Cash Stocks", "callback_data": "filter_news_cash"},
-            ],
-            [
-                {"text": "🏗️ 4. Order Stocks", "callback_data": "filter_news_order"},
-                {"text": "📑 5. Result Stocks", "callback_data": "filter_news_result"},
-            ],
-            [
-                {"text": "⚙️ 6. Settings", "callback_data": "menu_settings"},
-                {"text": "🔄 7. Refresh News", "callback_data": "action_refresh_news"},
-            ],
             [{"text": "📊 Live System Status", "callback_data": "menu_status"}],
-            [
-                {"text": "⏱️ Scan Interval", "callback_data": "menu_change_interval"},
-                {"text": "⚙️ Batch Limit", "callback_data": "menu_change_limit"},
-            ],
+            [{"text": "⏱️ Change Scan Interval", "callback_data": "menu_change_interval"}],
+            [{"text": "⚙️ Change Batch Limit (Items/Cycle)", "callback_data": "menu_change_limit"}],
         ]
     }
-
-
-def get_nse_announcements_submenu_markup() -> dict:
-    return {
-        "inline_keyboard": [
-            [
-                {"text": "📈 F&O Stocks", "callback_data": "filter_news_fno"},
-                {"text": "💵 Cash Stocks", "callback_data": "filter_news_cash"},
-            ],
-            [
-                {"text": "🏗️ Order Stocks", "callback_data": "filter_news_order"},
-                {"text": "📑 Result Stocks", "callback_data": "filter_news_result"},
-            ],
-            [{"text": "📋 All Announcements", "callback_data": "filter_news_all"}],
-            [{"text": "🔙 Back to Main Menu", "callback_data": "menu_main"}],
-        ]
-    }
-
-
-def get_settings_menu_markup(chat_id: str) -> dict:
-    entry = get_user_pref_entry(chat_id)
-    draft = entry.get("draft", [])
-
-    def _chk(cat_key: str, label: str) -> str:
-        mark = "✅" if cat_key in draft else "⬜"
-        return f"{mark} {label}"
-
-    return {
-        "inline_keyboard": [
-            [
-                {"text": _chk("fno", "F&O Stocks"), "callback_data": "pref_toggle_fno"},
-                {"text": _chk("cash", "Cash Stocks"), "callback_data": "pref_toggle_cash"},
-            ],
-            [
-                {"text": _chk("order", "Order Stocks"), "callback_data": "pref_toggle_order"},
-                {"text": _chk("result", "Result Stocks"), "callback_data": "pref_toggle_result"},
-            ],
-            [{"text": _chk("all", "All Announcements"), "callback_data": "pref_toggle_all"}],
-            [
-                {"text": "💾 Save Preferences", "callback_data": "pref_save"},
-                {"text": "🔄 Reset to Default", "callback_data": "pref_reset"},
-            ],
-            [{"text": "🔙 Back to Main Menu", "callback_data": "menu_main"}],
-        ]
-    }
-
-
-def format_settings_prompt(chat_id: str) -> str:
-    entry = get_user_pref_entry(chat_id)
-    saved = entry.get("saved", [])
-    draft = entry.get("draft", [])
-
-    saved_str = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in saved) if saved else "Default (All Impact Alerts)"
-    draft_str = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in draft) if draft else "Default (All Impact Alerts)"
-
-    return (
-        "⚙️ <b>STOCK NEWS PREFERENCES</b>\n\n"
-        "Select one or more stock categories you want to receive automatically when new announcements arrive:\n\n"
-        f"📌 <b>Currently Saved:</b> <i>{escape_html(saved_str)}</i>\n"
-        f"📝 <b>Current Selection:</b> <i>{escape_html(draft_str)}</i>\n\n"
-        "Tap categories to toggle, then press <b>💾 Save Preferences</b>."
-    )
 
 
 def get_interval_menu_markup() -> dict:
@@ -1679,77 +1292,6 @@ def get_limit_menu_markup() -> dict:
             [{"text": "⬅️ Back to Menu", "callback_data": "menu_main"}],
         ]
     }
-
-
-def dispatch_filtered_news(chat_id: str, category_filter: str) -> None:
-    """Displays matching announcements from existing fetched cache without extra API calls."""
-    label = FILTER_CATEGORY_LABELS.get(category_filter, "Selected Filter")
-    items = get_cached_announcements(category_filter=category_filter, limit=6)
-
-    if not items:
-        send_telegram_message(
-            f"ℹ️ <b>{escape_html(label)}</b>\n\n"
-            "No recent announcements found in cache for this category yet.\n"
-            "Use <b>🔄 Refresh News</b> to check for new NSE filings.",
-            reply_markup=get_main_menu_markup(),
-            chat_id=chat_id,
-        )
-        return
-
-    send_telegram_message(
-        f"📊 <b>{escape_html(label)}</b> — Showing latest <b>{len(items)}</b> matching alert(s):",
-        chat_id=chat_id,
-    )
-    for item in reversed(items):
-        msg_text = item.get("formatted_message", "")
-        if msg_text:
-            send_telegram_message(msg_text, chat_id=chat_id)
-            time.sleep(0.25)
-
-
-def handle_refresh_news(chat_id: str) -> None:
-    """Checks for any new unseen announcements via existing cycle engine and displays matching news without duplicates."""
-    new_posted = run_cycle(target_chat_id=chat_id)
-
-    if new_posted > 0:
-        send_telegram_message(
-            f"✅ <b>Refresh Complete!</b> Dispatched <b>{new_posted}</b> new announcement(s) matching your preferences.",
-            reply_markup=get_main_menu_markup(),
-            chat_id=chat_id,
-        )
-        return
-
-    # If no new unseen filings arrived, show latest matching items from existing cache based on user preferences
-    entry = get_user_pref_entry(chat_id)
-    saved = entry.get("saved", [])
-
-    if not saved or "all" in saved:
-        items = get_cached_announcements(category_filter="all", limit=5)
-        pref_label = "All Announcements"
-    else:
-        with _CACHE_LOCK:
-            all_items = _load_json_safe(NEWS_CACHE_PATH).get("items", [])
-        items = [it for it in all_items if any(c in saved for c in it.get("categories", []))][:5]
-        pref_label = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in saved)
-
-    if not items:
-        send_telegram_message(
-            "🔄 <b>Refresh Complete:</b> No new NSE filings since last scan, and no cached items match your current filter.",
-            reply_markup=get_main_menu_markup(),
-            chat_id=chat_id,
-        )
-        return
-
-    send_telegram_message(
-        f"🔄 <b>No brand-new NSE filings since last check.</b>\n"
-        f"Showing latest <b>{len(items)}</b> cached alert(s) for <i>{escape_html(pref_label)}</i>:",
-        chat_id=chat_id,
-    )
-    for item in reversed(items):
-        msg_text = item.get("formatted_message", "")
-        if msg_text:
-            send_telegram_message(msg_text, chat_id=chat_id)
-            time.sleep(0.25)
 
 
 def answer_callback_query(callback_query_id: str, text: str = None) -> None:
@@ -1787,110 +1329,32 @@ def start_telegram_command_listener() -> None:
 
                     if "message" in update:
                         msg = update["message"]
-                        chat_id = str(msg.get("chat", {}).get("id") or TELEGRAM_CHAT_ID)
                         text = (msg.get("text", "") or "").strip().lower()
 
                         if text in ["hi", "menu", "status", "/start", "/menu", "/status"]:
                             reply_text = (
-                                "📊 <b>STOCK NEWS FILTER & ALERT DASHBOARD</b>\n\n"
+                                "👋 <b>NSE Live Alert Engine Dashboard</b>\n\n"
                                 f"Current Interval: <b>{CHECK_INTERVAL_SECONDS // 60} mins</b>\n"
                                 f"Batch Scan Limit: <b>{MAX_EVALUATIONS_PER_CYCLE} items/cycle</b>\n"
                                 f"Indexed F&O Contracts: <b>{get_fno_total_count()}</b>\n\n"
-                                "Choose a news category, configure preferences, or manage bot settings:"
+                                "Configure system parameters:"
                             )
-                            send_telegram_message(reply_text, reply_markup=get_main_menu_markup(), chat_id=chat_id)
+                            send_telegram_message(reply_text, reply_markup=get_main_menu_markup())
 
                     elif "callback_query" in update:
                         cq = update["callback_query"]
                         cq_id = cq.get("id")
                         data_val = cq.get("data", "")
-                        cq_msg = cq.get("message", {})
-                        chat_id = str(cq_msg.get("chat", {}).get("id") or TELEGRAM_CHAT_ID)
-                        message_id = cq_msg.get("message_id")
 
                         if data_val == "menu_status":
                             answer_callback_query(cq_id)
-                            send_status_report("System Live Health Status", chat_id=chat_id)
-
-                        elif data_val == "menu_nse_announcements":
-                            answer_callback_query(cq_id)
-                            send_telegram_message(
-                                "📰 <b>NSE ANNOUNCEMENTS FILTER</b>\n\nSelect a stock category to view matching announcements:",
-                                reply_markup=get_nse_announcements_submenu_markup(),
-                                chat_id=chat_id,
-                            )
-
-                        elif data_val.startswith("filter_news_"):
-                            cat_key = data_val.replace("filter_news_", "")
-                            answer_callback_query(cq_id, f"Loading {FILTER_CATEGORY_LABELS.get(cat_key, 'News')}...")
-                            dispatch_filtered_news(chat_id, cat_key)
-
-                        elif data_val == "menu_settings":
-                            answer_callback_query(cq_id)
-                            # Sync draft to currently saved preferences on open
-                            prefs = load_user_preferences()
-                            entry = prefs.get(chat_id, {"saved": [], "draft": []})
-                            entry["draft"] = list(entry.get("saved", []))
-                            prefs[chat_id] = entry
-                            save_user_preferences(prefs)
-
-                            send_telegram_message(
-                                format_settings_prompt(chat_id),
-                                reply_markup=get_settings_menu_markup(chat_id),
-                                chat_id=chat_id,
-                            )
-
-                        elif data_val.startswith("pref_toggle_"):
-                            cat_key = data_val.replace("pref_toggle_", "")
-                            toggle_user_pref_draft(chat_id, cat_key)
-                            answer_callback_query(cq_id, f"Toggled {FILTER_CATEGORY_LABELS.get(cat_key, cat_key)}")
-                            if message_id:
-                                edit_telegram_message(
-                                    chat_id=chat_id,
-                                    message_id=message_id,
-                                    text=format_settings_prompt(chat_id),
-                                    reply_markup=get_settings_menu_markup(chat_id),
-                                )
-
-                        elif data_val == "pref_save":
-                            saved_list = commit_user_prefs(chat_id)
-                            label_str = ", ".join(FILTER_CATEGORY_LABELS.get(c, c) for c in saved_list) if saved_list else "Default (All Alerts)"
-                            answer_callback_query(cq_id, "Preferences Saved!")
-                            if message_id:
-                                edit_telegram_message(
-                                    chat_id=chat_id,
-                                    message_id=message_id,
-                                    text=(
-                                        "✅ <b>Preferences Saved Successfully!</b>\n\n"
-                                        f"Your automatic news feed will now display:\n<b>{escape_html(label_str)}</b>"
-                                    ),
-                                    reply_markup=get_main_menu_markup(),
-                                )
-
-                        elif data_val == "pref_reset":
-                            reset_user_prefs(chat_id)
-                            answer_callback_query(cq_id, "Reset to Default!")
-                            if message_id:
-                                edit_telegram_message(
-                                    chat_id=chat_id,
-                                    message_id=message_id,
-                                    text=(
-                                        "🔄 <b>Preferences Reset to Default!</b>\n\n"
-                                        "All high/medium impact NSE announcements will be displayed automatically."
-                                    ),
-                                    reply_markup=get_settings_menu_markup(chat_id),
-                                )
-
-                        elif data_val == "action_refresh_news":
-                            answer_callback_query(cq_id, "Refreshing NSE News...")
-                            handle_refresh_news(chat_id)
+                            send_status_report("System Live Health Status")
 
                         elif data_val == "menu_change_interval":
                             answer_callback_query(cq_id)
                             send_telegram_message(
                                 "⏱️ <b>Select Scan Time Interval:</b>",
                                 reply_markup=get_interval_menu_markup(),
-                                chat_id=chat_id,
                             )
 
                         elif data_val == "menu_change_limit":
@@ -1898,15 +1362,13 @@ def start_telegram_command_listener() -> None:
                             send_telegram_message(
                                 "⚙️ <b>Select Max Announcements Checked Per Cycle:</b>",
                                 reply_markup=get_limit_menu_markup(),
-                                chat_id=chat_id,
                             )
 
                         elif data_val == "menu_main":
                             answer_callback_query(cq_id)
                             send_telegram_message(
-                                "📊 <b>STOCK NEWS FILTER & ALERT DASHBOARD</b>",
+                                "👋 <b>NSE Live Alert Engine Dashboard</b>",
                                 reply_markup=get_main_menu_markup(),
-                                chat_id=chat_id,
                             )
 
                         elif data_val.startswith("set_interval_"):
@@ -1916,8 +1378,7 @@ def start_telegram_command_listener() -> None:
                             label = f"{mins // 60} hr" if mins >= 60 else f"{mins} mins"
                             answer_callback_query(cq_id, f"Interval set to {label}!")
                             send_telegram_message(
-                                f"✅ <b>Scan interval updated!</b>\nNext checks will trigger every <b>{label}</b>.",
-                                chat_id=chat_id,
+                                f"✅ <b>Scan interval updated!</b>\nNext checks will trigger every <b>{label}</b>."
                             )
 
                         elif data_val.startswith("set_limit_"):
@@ -1925,136 +1386,114 @@ def start_telegram_command_listener() -> None:
                             MAX_EVALUATIONS_PER_CYCLE = limit_val
                             answer_callback_query(cq_id, f"Batch limit set to {limit_val} items!")
                             send_telegram_message(
-                                f"✅ <b>Cycle limit updated!</b>\nUp to <b>{limit_val} items</b> will now be scanned per cycle in 50-item batches.",
-                                chat_id=chat_id,
+                                f"✅ <b>Cycle limit updated!</b>\nUp to <b>{limit_val} items</b> will now be scanned per cycle in 50-item batches."
                             )
 
             except Exception:
                 time.sleep(3)
 
     threading.Thread(target=_listener_loop, daemon=True, name="tg-listener").start()
-    log("✅ Interactive Telegram configuration & news filter listener started.")
+    log("✅ Interactive Telegram configuration listener started.")
 
 
 # ============================================================================
 # MAIN SCAN LOOP
 # ============================================================================
-def run_cycle(target_chat_id: str = None) -> int:
+def run_cycle() -> None:
     global CYCLE_COUNTER
-    with _CYCLE_LOCK:
-        CYCLE_COUNTER += 1
-        log(f"--- Starting scan cycle #{CYCLE_COUNTER} ---")
+    CYCLE_COUNTER += 1
+    log(f"--- Starting scan cycle #{CYCLE_COUNTER} ---")
 
-        if not MODEL_NAME and not resolve_gemini_model():
-            log("⏳ Gemini service unavailable. Skipping this cycle.")
-            return 0
+    if not MODEL_NAME and not resolve_gemini_model():
+        log("⏳ Gemini service unavailable. Skipping this cycle.")
+        return
 
-        announcements = fetch_nse_announcements()
-        seen = load_seen()
-        posted_count = 0
-        dispatch_chat = str(target_chat_id or TELEGRAM_CHAT_ID)
+    announcements = fetch_nse_announcements()
+    seen = load_seen()
+    posted_count = 0
 
-        unseen_items = []
-        for ann in announcements:
-            ann_id = make_announcement_id(ann)
-            if ann_id not in seen:
-                ann["id"] = ann_id
-                unseen_items.append(ann)
-                if len(unseen_items) >= MAX_EVALUATIONS_PER_CYCLE:
-                    break
-
-        if not unseen_items:
-            log("No new announcements to evaluate.")
-            return 0
-
-        log(f"Processing {len(unseen_items)} unseen item(s) with Gemini Scrip Extractor in batches...")
-
-        CHUNK_SIZE = 50
-        batches = [unseen_items[i:i + CHUNK_SIZE] for i in range(0, len(unseen_items), CHUNK_SIZE)]
-
-        for batch in batches:
-            if gemini_budget_remaining() <= 0:
-                log("🛑 Daily Gemini budget exhausted.")
+    unseen_items = []
+    for ann in announcements:
+        ann_id = make_announcement_id(ann)
+        if ann_id not in seen:
+            ann["id"] = ann_id
+            unseen_items.append(ann)
+            if len(unseen_items) >= MAX_EVALUATIONS_PER_CYCLE:
                 break
 
-            batch_results = analyze_announcements_batch(batch)
+    if not unseen_items:
+        log("No new announcements to evaluate.")
+        return
 
-            for item in batch:
-                ann_id = item["id"]
-                fallback_symbol = item.get("symbol", "")
+    log(f"Processing {len(unseen_items)} unseen item(s) with Gemini Scrip Extractor in batches...")
 
-                if ann_id in batch_results:
-                    fields = batch_results[ann_id]
+    CHUNK_SIZE = 50
+    batches = [unseen_items[i:i + CHUNK_SIZE] for i in range(0, len(unseen_items), CHUNK_SIZE)]
 
-                    # 1. Resolve against official NSE cash-equity master first.
-                    equity_master = get_nse_equity_master()
-                    announcement_text = f"{item.get('desc', '')} {item.get('attchmntFile', '')}"
-                    official_match = resolve_official_nse_symbol(announcement_text, equity_master)
-                    gemini_scrip = normalize_symbol(fields.get("script_symbol", ""))
+    for batch in batches:
+        if gemini_budget_remaining() <= 0:
+            log("🛑 Daily Gemini budget exhausted.")
+            break
 
-                    if official_match:
-                        final_symbol = official_match
-                        if gemini_scrip and gemini_scrip != official_match:
-                            log(f"⚠️ Symbol conflict for announcement {ann_id[:8]}: NSE master={official_match}, Gemini={gemini_scrip}. Using NSE master.")
-                    elif is_official_nse_symbol(gemini_scrip, equity_master):
-                        final_symbol = gemini_scrip
-                    else:
-                        log(f"⏭️ Skipping announcement {ann_id[:8]}: no verified NSE equity symbol (Gemini returned '{gemini_scrip or 'blank'}').")
-                        mark_seen(seen, ann_id, "", "discarded_unresolved_symbol")
-                        continue
+        batch_results = analyze_announcements_batch(batch)
 
-                    # 2. CMP fetch karo
-                    price, pchange = fetch_live_quote(final_symbol)
-                    published_str = format_ist_timestamp(item.get("an_dt", ""))
+        for item in batch:
+            ann_id = item["id"]
+            fallback_symbol = item.get("symbol", "")
 
-                    # 3. PDF Data Deep Extraction (only for results or order wins to save CPU/Network)
-                    pdf_extracted_metrics = {}
-                    pdf_link = item.get("attchmntFile", "")
-                    event_type_str = (fields.get("event_type", "") + " " + item.get("desc", "")).lower()
+            if ann_id in batch_results:
+                fields = batch_results[ann_id]
 
-                    if pdf_link and pdf_link.endswith(".pdf") and any(k in event_type_str for k in ["result", "financial", "outcome", "order", "contract", "award", "ufr"]):
-                        log(f"📑 Downloading PDF for {final_symbol}: {pdf_link}")
-                        pdf_local = download_announcement_pdf(pdf_link)
-                        if pdf_local:
-                            pdf_extracted_metrics = extract_key_details_from_pdf(pdf_local)
-                            if pdf_extracted_metrics:
-                                log(f"📊 PDF Metrics Extracted for {final_symbol}: {pdf_extracted_metrics}")
+                # 1. Resolve against official NSE cash-equity master first.
+                equity_master = get_nse_equity_master()
+                announcement_text = f"{item.get('desc', '')} {item.get('attchmntFile', '')}"
+                official_match = resolve_official_nse_symbol(announcement_text, equity_master)
+                gemini_scrip = normalize_symbol(fields.get("script_symbol", ""))
 
-                    # 4. Message format karo (internal SQLite query will check F&O or Cash)
-                    message = format_telegram_message(item, fields, final_symbol, price, pchange, published_str, pdf_data=pdf_extracted_metrics)
-
-                    # 4b. Classify & cache evaluated item for menu filters without extra API calls
-                    categories = classify_news_categories(final_symbol, fields.get("event_type", ""), item.get("desc", ""))
-                    cache_processed_announcement(ann_id, {
-                        "id": ann_id,
-                        "symbol": final_symbol,
-                        "categories": categories,
-                        "impact": fields.get("impact", "MEDIUM"),
-                        "event_type": fields.get("event_type", ""),
-                        "published_str": published_str,
-                        "formatted_message": message,
-                        "cached_at": datetime.now(timezone.utc).isoformat(),
-                    })
-
-                    # 5. Dispatch alert to Telegram (respecting saved user default preferences)
-                    if not matches_user_preferences(categories, chat_id=dispatch_chat):
-                        mark_seen(seen, ann_id, final_symbol, "filtered_by_user_pref")
-                        log(f"🔇 Skipped auto-alert for {final_symbol} (filtered by user preferences: {categories})")
-                        continue
-
-                    if send_telegram_message(message, chat_id=dispatch_chat):
-                        mark_seen(seen, ann_id, final_symbol, "posted")
-                        posted_count += 1
-                        log(f"✅ Alert sent [{fields['impact']}]: {final_symbol}")
-                    else:
-                        log(f"⚠️ Telegram delivery failed for {final_symbol}")
+                if official_match:
+                    final_symbol = official_match
+                    if gemini_scrip and gemini_scrip != official_match:
+                        log(f"⚠️ Symbol conflict for announcement {ann_id[:8]}: NSE master={official_match}, Gemini={gemini_scrip}. Using NSE master.")
+                elif is_official_nse_symbol(gemini_scrip, equity_master):
+                    final_symbol = gemini_scrip
                 else:
-                    mark_seen(seen, ann_id, fallback_symbol, "discarded_low_impact")
+                    log(f"⏭️ Skipping announcement {ann_id[:8]}: no verified NSE equity symbol (Gemini returned '{gemini_scrip or 'blank'}').")
+                    mark_seen(seen, ann_id, "", "discarded_unresolved_symbol")
+                    continue
 
-            time.sleep(2.0)
+                # 2. CMP fetch karo
+                price, pchange = fetch_live_quote(final_symbol)
+                published_str = format_ist_timestamp(item.get("an_dt", ""))
 
-        log(f"--- Cycle #{CYCLE_COUNTER} complete: {len(unseen_items)} evaluated, {posted_count} posted. ---")
-        return posted_count
+                # 3. PDF Data Deep Extraction (only for results or order wins to save CPU/Network)
+                pdf_extracted_metrics = {}
+                pdf_link = item.get("attchmntFile", "")
+                event_type_str = (fields.get("event_type", "") + " " + item.get("desc", "")).lower()
+
+                if pdf_link and pdf_link.endswith(".pdf") and any(k in event_type_str for k in ["result", "financial", "outcome", "order", "contract", "award", "ufr"]):
+                    log(f"📑 Downloading PDF for {final_symbol}: {pdf_link}")
+                    pdf_local = download_announcement_pdf(pdf_link)
+                    if pdf_local:
+                        pdf_extracted_metrics = extract_key_details_from_pdf(pdf_local)
+                        if pdf_extracted_metrics:
+                            log(f"📊 PDF Metrics Extracted for {final_symbol}: {pdf_extracted_metrics}")
+
+                # 4. Message format karo (internal SQLite query will check F&O or Cash)
+                message = format_telegram_message(item, fields, final_symbol, price, pchange, published_str, pdf_data=pdf_extracted_metrics)
+
+                # 5. Dispatch alert to Telegram
+                if send_telegram_message(message):
+                    mark_seen(seen, ann_id, final_symbol, "posted")
+                    posted_count += 1
+                    log(f"✅ Alert sent [{fields['impact']}]: {final_symbol}")
+                else:
+                    log(f"⚠️ Telegram delivery failed for {final_symbol}")
+            else:
+                mark_seen(seen, ann_id, fallback_symbol, "discarded_low_impact")
+
+        time.sleep(2.0)
+
+    log(f"--- Cycle #{CYCLE_COUNTER} complete: {len(unseen_items)} evaluated, {posted_count} posted. ---")
 
 
 def validate_config() -> bool:
@@ -2111,7 +1550,7 @@ def main() -> None:
         f"F&O / Lot Size Detection: Active ({get_fno_total_count()} symbols indexed)\n"
         f"Scrip Resolution: Official NSE Master + Gemini Validation\n"
         f"PDF Financial/Order Extractor: Active\n"
-        f"Monitoring NSE RSS XML directly every {CHECK_INTERVAL_SECONDS // 60} min.",
+        f"Monitoring NSE RSS XML directly every {CHECK_INTERVAL_SECONDS // 60} min."
     )
 
     start_two_hour_report_thread()
@@ -2135,3 +1574,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
